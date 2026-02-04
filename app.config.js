@@ -18,10 +18,13 @@ export default {
       },
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
+      // Required for HTTP traffic on Android 9+ (API 28+)
+      usesCleartextTraffic: true,
     },
     web: { output: "static", favicon: "./assets/images/favicon.png" },
     plugins: [
       "expo-router",
+      "expo-secure-store",
       [
         "expo-splash-screen",
         {

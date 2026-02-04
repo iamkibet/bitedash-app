@@ -1,118 +1,87 @@
 import { HapticTab } from "@/components/haptic-tab";
+import { TopBarRight } from "@/components/top-bar-header";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useAuthStore } from "@/lib/store/authStore";
-import { useCartStore } from "@/lib/store/cartStore";
 import { Tabs } from "expo-router";
 import React from "react";
+import { Platform } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+const TAB_BAR_HEIGHT = 56;
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   const user = useAuthStore((s) => s.user);
-  const cartCount = useCartStore((s) => s.getItemCount());
-  const role = user?.role ?? "customer";
-
   const tint = Colors[colorScheme ?? "light"].tint;
+  const role = user?.role ?? "customer";
+  const insets = useSafeAreaInsets();
+  const tabBarBottomPadding = insets.bottom > 0 ? insets.bottom : 12;
 
   return (
     <Tabs
       screenOptions={{
         tabBarActiveTintColor: tint,
-        headerShown: false,
+        headerShown: true,
+        headerRight: () => <TopBarRight />,
+        headerTitleStyle: { fontSize: 18, fontWeight: "600", color: "#111" },
+        headerShadowVisible: false,
+        headerStyle: {
+          backgroundColor: "#fff",
+          borderBottomWidth: 1,
+          borderBottomColor: "#e5e7eb",
+        },
         tabBarButton: HapticTab,
+        tabBarLabelStyle: { fontSize: 11, fontWeight: "500" },
+        tabBarInactiveTintColor: "#6b7280",
+        tabBarStyle: {
+          backgroundColor: "#fff",
+          borderTopColor: "#e5e7eb",
+          borderTopWidth: 1,
+          paddingTop: 8,
+          paddingBottom: tabBarBottomPadding,
+          height: TAB_BAR_HEIGHT + tabBarBottomPadding,
+          ...(Platform.OS === "android" && { elevation: 8 }),
+        },
+        tabBarItemStyle: {
+          paddingBottom: Platform.OS === "ios" ? 0 : 4,
+        },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
+          title: "Home",
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={24} name="house.fill" color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="stores"
+        options={{
           title: "Stores",
           tabBarIcon: ({ color }) => (
             <IconSymbol size={24} name="storefront.fill" color={color} />
           ),
-          href: role === "restaurant" || role === "rider" ? null : undefined,
         }}
       />
-      {role === "customer" && (
-        <Tabs.Screen
-          name="cart"
-          options={{
-            title: "Cart",
-            tabBarBadge: cartCount > 0 ? cartCount : undefined,
-            tabBarIcon: ({ color }) => (
-              <IconSymbol size={24} name="cart.fill" color={color} />
-            ),
-          }}
-        />
-      )}
       <Tabs.Screen
         name="orders"
         options={{
-          title: role === "rider" ? "My Deliveries" : "Orders",
+          title: role === "rider" ? "Deliveries" : "Orders",
           tabBarIcon: ({ color }) => (
             <IconSymbol size={24} name="list.bullet" color={color} />
           ),
         }}
       />
-      {role === "customer" && (
-        <Tabs.Screen
-          name="favourites"
-          options={{
-            title: "Favourites",
-            tabBarIcon: ({ color }) => (
-              <IconSymbol size={24} name="heart.fill" color={color} />
-            ),
-          }}
-        />
-      )}
-      {role === "rider" && (
-        <Tabs.Screen
-          name="rider-available"
-          options={{
-            title: "Available",
-            tabBarIcon: ({ color }) => (
-              <IconSymbol size={24} name="list.bullet" color={color} />
-            ),
-          }}
-        />
-      )}
-      {role === "restaurant" && (
-        <>
-          <Tabs.Screen
-            name="restaurant"
-            options={{
-              title: "My Store",
-              tabBarIcon: ({ color }) => (
-                <IconSymbol size={24} name="storefront.fill" color={color} />
-              ),
-            }}
-          />
-          <Tabs.Screen
-            name="restaurant-menu"
-            options={{
-              title: "Menu",
-              tabBarIcon: ({ color }) => (
-                <IconSymbol size={24} name="menucard.fill" color={color} />
-              ),
-            }}
-          />
-          <Tabs.Screen
-            name="restaurant-orders"
-            options={{
-              title: "Orders",
-              tabBarIcon: ({ color }) => (
-                <IconSymbol size={24} name="list.bullet" color={color} />
-              ),
-            }}
-          />
-        </>
-      )}
       <Tabs.Screen
-        name="account"
+        name="settings"
         options={{
-          title: "Account",
+          title: "Settings",
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={24} name="person.fill" color={color} />
+            <IconSymbol size={24} name="gearshape.fill" color={color} />
           ),
         }}
       />

@@ -153,12 +153,12 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f9fafb" },
   header: {
     padding: 16,
-    paddingTop: 48,
+    paddingTop: 16,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  title: { fontSize: 28, fontWeight: "700", color: "#111" },
+  title: { fontSize: 22, fontWeight: "700", color: "#111" },
   addBtn: {
     backgroundColor: "#ed751a",
     paddingVertical: 10,

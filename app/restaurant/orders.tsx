@@ -16,7 +16,6 @@ import {
 
 export default function RestaurantOrdersScreen() {
   const router = useRouter();
-  const [storeId, setStoreId] = useState<number | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -26,11 +25,9 @@ export default function RestaurantOrdersScreen() {
     else setLoading(true);
     try {
       const store = await getMyStore();
-      setStoreId(store.id);
       const res = await listStoreOrders(store.id, { page: 1 });
       setOrders(res.data);
     } catch {
-      setStoreId(null);
       setOrders([]);
     } finally {
       setLoading(false);
@@ -99,8 +96,8 @@ export default function RestaurantOrdersScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f9fafb" },
-  header: { padding: 16, paddingTop: 48 },
-  title: { fontSize: 28, fontWeight: "700", color: "#111" },
+  header: { padding: 16, paddingTop: 16 },
+  title: { fontSize: 22, fontWeight: "700", color: "#111" },
   list: { padding: 16, paddingBottom: 32 },
   centered: { flex: 1, justifyContent: "center", alignItems: "center" },
   emptyText: { color: "#6b7280", fontSize: 16 },

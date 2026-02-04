@@ -30,9 +30,43 @@ export async function register(
 }
 
 export async function login(body: LoginBody): Promise<AuthSuccessResponse> {
-  const { data } = await apiClient.post<AuthSuccessResponse>("/login", body);
-  if (data.token) await setStoredToken(data.token);
-  return data;
+  // Using fetch directly as a workaround for Android POST issues with axios
+  const baseURL = apiClient.defaults.baseURL;
+  console.log(`[Auth] Attempting login to ${baseURL}/login`);
+
+  try {
+    const response = await fetch(`${baseURL}/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    console.log(`[Auth] Response status: ${response.status}`);
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.log(`[Auth] Error response:`, errorData);
+      const error = new Error(errorData.message || "Login failed") as Error & {
+        response?: { status: number; data: unknown };
+      };
+      error.response = { status: response.status, data: errorData };
+      throw error;
+    }
+
+    const data: AuthSuccessResponse = await response.json();
+    console.log(`[Auth] Login successful`);
+
+    if (data.token) {
+      await setStoredToken(data.token);
+    }
+    return data;
+  } catch (error) {
+    console.error(`[Auth] Login error:`, error);
+    throw error;
+  }
 }
 
 export async function logout(): Promise<void> {
