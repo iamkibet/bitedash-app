@@ -210,8 +210,11 @@ function HomeDashboard() {
             </View>
           </View>
 
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Open stores</Text>
+          <View style={[styles.sectionHeader, styles.sectionHeaderFirst]}>
+            <View style={styles.sectionTitleRow}>
+              <View style={styles.sectionTitleAccent} />
+              <Text style={styles.sectionTitle}>Open stores</Text>
+            </View>
           </View>
 
           {loading ? (
@@ -247,7 +250,10 @@ function HomeDashboard() {
           {dishes.length > 0 && (
             <>
               <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Order now</Text>
+                <View style={styles.sectionTitleRow}>
+                  <View style={styles.sectionTitleAccent} />
+                  <Text style={styles.sectionTitle}>Order now</Text>
+                </View>
               </View>
               <FlatList
                 data={dishes}
@@ -315,8 +321,11 @@ function HomeDashboard() {
 
           {favourites.length > 0 && (
             <>
-              <View style={[styles.sectionHeader, styles.recentOrdersHeader]}>
-                <Text style={styles.sectionTitle}>Your favourites</Text>
+              <View style={[styles.sectionHeader, styles.sectionHeaderWithLink]}>
+                <View style={styles.sectionTitleRow}>
+                  <View style={styles.sectionTitleAccent} />
+                  <Text style={styles.sectionTitle}>Your favourites</Text>
+                </View>
                 <TouchableOpacity
                   onPress={() => router.push("/favourites")}
                   hitSlop={8}
@@ -392,8 +401,11 @@ function HomeDashboard() {
             </>
           )}
 
-          <View style={[styles.sectionHeader, styles.recentOrdersHeader]}>
-            <Text style={styles.sectionTitle}>Recent orders</Text>
+          <View style={[styles.sectionHeader, styles.sectionHeaderWithLink]}>
+            <View style={styles.sectionTitleRow}>
+              <View style={styles.sectionTitleAccent} />
+              <Text style={styles.sectionTitle}>Recent orders</Text>
+            </View>
             <TouchableOpacity
               onPress={() => router.push("/(tabs)/orders")}
               hitSlop={8}
@@ -840,13 +852,34 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   sectionHeader: {
-    marginTop: 24,
-    marginBottom: 16,
+    marginTop: 28,
+    marginBottom: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  sectionHeaderFirst: {
+    marginTop: 20,
+  },
+  sectionHeaderWithLink: {
+    marginBottom: 14,
+  },
+  sectionTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  sectionTitleAccent: {
+    width: 3,
+    height: 18,
+    borderRadius: 2,
+    backgroundColor: PRIMARY_YELLOW,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#111",
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#1f2937",
+    letterSpacing: 0.2,
   },
   sectionSubtitle: {
     fontSize: 14,
