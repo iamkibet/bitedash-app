@@ -14,11 +14,12 @@ const TAB_BAR_HEIGHT = 56;
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   const user = useAuthStore((s) => s.user);
-  const tint = Colors[colorScheme ?? "light"].tint;
   const role = String(user?.role ?? "customer").toLowerCase();
   const insets = useSafeAreaInsets();
   const isRestaurant = role === "restaurant";
+  const isRider = role === "rider";
   const tabBarBottomPadding = insets.bottom > 0 ? insets.bottom : 12;
+  const tint = Colors[colorScheme ?? "light"].tint;
 
   return (
     <Tabs
@@ -66,15 +67,19 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => (
             <IconSymbol size={24} name="storefront.fill" color={color} />
           ),
-          href: isRestaurant ? null : "/(tabs)/stores",
+          href: isRestaurant || isRider ? null : "/(tabs)/stores",
         }}
       />
       <Tabs.Screen
         name="orders"
         options={{
-          title: role === "rider" ? "Deliveries" : "Orders",
+          title: isRider ? "Deliveries" : "Orders",
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={24} name="list.bullet" color={color} />
+            <IconSymbol
+              size={24}
+              name={isRider ? "shippingbox.fill" : "list.bullet"}
+              color={color}
+            />
           ),
         }}
       />

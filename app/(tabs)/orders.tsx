@@ -86,6 +86,7 @@ export default function OrdersScreen() {
   }
 
   const role: Role = (user.role ?? "customer") as Role;
+  const isRider = role === "rider";
   const listTitle =
     role === "rider"
       ? "My deliveries"
@@ -100,28 +101,45 @@ export default function OrdersScreen() {
         : "Your order history";
   const showRestaurantColumn = role === "customer" || role === "rider";
   const bottomPad = Math.max(insets.bottom, 24);
+  const accent = ACCENT;
 
   return (
-    <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: 12 + insets.top }]}>
-        <Text style={styles.title}>{listTitle}</Text>
-        <Text style={styles.subtitle}>
+    <View style={[styles.container, isRider && styles.riderContainer]}>
+      <View
+        style={[
+          styles.header,
+          { paddingTop: 12 + insets.top },
+          isRider && styles.riderHeader,
+        ]}
+      >
+        <Text style={[styles.title, isRider && styles.riderHeaderTitle]}>
+          {listTitle}
+        </Text>
+        <Text style={[styles.subtitle, isRider && styles.riderHeaderSubtitle]}>
           {orders.length > 0
-            ? `${orders.length} order${orders.length === 1 ? "" : "s"}`
+            ? isRider
+              ? `${orders.length} delivery${orders.length === 1 ? "" : "ies"}`
+              : `${orders.length} order${orders.length === 1 ? "" : "s"}`
             : listSubtitle}
         </Text>
       </View>
 
       {loading ? (
         <View style={styles.centered}>
-          <ActivityIndicator size="small" color={ACCENT} />
+          <ActivityIndicator size="small" color={accent} />
         </View>
       ) : orders.length === 0 ? (
         <View style={styles.emptyWrap}>
-          <View style={styles.emptyIconWrap}>
-            <Text style={styles.emptyIcon}>📋</Text>
+          <View style={[styles.emptyIconWrap, isRider && styles.riderEmptyIconWrap]}>
+            {isRider ? (
+              <IconSymbol name="shippingbox.fill" size={36} color="#94a3b8" />
+            ) : (
+              <Text style={styles.emptyIcon}>📋</Text>
+            )}
           </View>
-          <Text style={styles.emptyTitle}>No orders yet</Text>
+          <Text style={styles.emptyTitle}>
+            {isRider ? "No deliveries yet" : "No orders yet"}
+          </Text>
           <Text style={styles.emptySubtext}>
             {role === "customer"
               ? "Orders you place will appear here."
@@ -130,6 +148,77 @@ export default function OrdersScreen() {
                 : "Orders for your store will appear here."}
           </Text>
         </View>
+      ) : isRider ? (
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[
+            styles.riderScrollContent,
+            { paddingBottom: bottomPad },
+          ]}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => load(true)}
+              tintColor={ACCENT}
+            />
+          }
+        >
+          {orders.map((order) => (
+            <TouchableOpacity
+              key={order.id}
+              style={styles.riderDeliveryCard}
+              onPress={() => handleOrderPress(order)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.riderCardHeader}>
+                <Text style={styles.riderCardOrderId}>Order #{order.id}</Text>
+                <View
+                  style={[
+                    styles.riderStatusBadge,
+                    order.status === "delivered" && styles.riderStatusBadgeSuccess,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.riderStatusBadgeText,
+                      order.status === "delivered" && styles.riderStatusBadgeTextSuccess,
+                    ]}
+                  >
+                    {ORDER_STATUS_LABELS[order.status] ?? order.status}
+                  </Text>
+                </View>
+              </View>
+              {order.restaurant?.name && (
+                <View style={styles.riderCardMetaRow}>
+                  <IconSymbol name="storefront.fill" size={14} color="#64748b" />
+                  <Text style={styles.riderCardMeta} numberOfLines={1}>
+                    {order.restaurant.name}
+                  </Text>
+                </View>
+              )}
+              {order.delivery_address && (
+                <View style={styles.riderCardMetaRow}>
+                  <IconSymbol name="mappin" size={14} color="#64748b" />
+                  <Text style={styles.riderCardMeta} numberOfLines={1}>
+                    {order.delivery_address}
+                  </Text>
+                </View>
+              )}
+              <View style={styles.riderCardFooter}>
+                <Text style={styles.riderCardAmount}>
+                  {formatKES(order.total_amount)}
+                </Text>
+                <View style={styles.riderCardTimeWrap}>
+                  <Text style={styles.riderCardTime}>
+                    {formatRelative(order.created_at)}
+                  </Text>
+                  <IconSymbol name="chevron.right" size={18} color="#94a3b8" />
+                </View>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       ) : (
         <ScrollView
           style={styles.scroll}
@@ -144,7 +233,6 @@ export default function OrdersScreen() {
           }
         >
           <View style={styles.tableWrap}>
-            {/* Table header */}
             <View style={styles.tableHeader}>
               <View style={[styles.th, styles.thOrder]}>
                 <Text style={styles.thText}>Order</Text>
@@ -169,8 +257,6 @@ export default function OrdersScreen() {
                 <Text style={styles.thText} />
               </View>
             </View>
-
-            {/* Table rows */}
             {orders.map((order, index) => (
               <TouchableOpacity
                 key={order.id}
@@ -187,10 +273,7 @@ export default function OrdersScreen() {
                 </View>
                 {showRestaurantColumn && (
                   <View style={[styles.td, styles.tdRestaurant]}>
-                    <Text
-                      style={styles.restaurantText}
-                      numberOfLines={1}
-                    >
+                    <Text style={styles.restaurantText} numberOfLines={1}>
                       {order.restaurant?.name ?? "—"}
                     </Text>
                   </View>
@@ -261,7 +344,94 @@ const styles = StyleSheet.create({
   },
   emptyText: { color: "#64748b", fontSize: 14 },
 
-  // Table
+  // Rider-specific
+  riderContainer: { backgroundColor: "#f1f5f9" },
+  riderHeader: {
+    backgroundColor: "#fff",
+    borderBottomColor: "#e2e8f0",
+  },
+  riderHeaderTitle: { color: "#0f172a" },
+  riderHeaderSubtitle: { color: "#64748b" },
+  riderEmptyIconWrap: { backgroundColor: "#f1f5f9" },
+  riderScrollContent: {
+    paddingHorizontal: TABLE_PAD,
+    paddingTop: 20,
+  },
+  riderDeliveryCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  riderCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  riderCardOrderId: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#1e293b",
+  },
+  riderStatusBadge: {
+    backgroundColor: "#fef3c7",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  riderStatusBadgeSuccess: {
+    backgroundColor: "#f1f5f9",
+  },
+  riderStatusBadgeText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#92400e",
+  },
+  riderStatusBadgeTextSuccess: {
+    color: "#475569",
+  },
+  riderCardMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 6,
+  },
+  riderCardMeta: {
+    flex: 1,
+    fontSize: 14,
+    color: "#475569",
+  },
+  riderCardFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#f1f5f9",
+  },
+  riderCardAmount: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: ACCENT,
+  },
+  riderCardTimeWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  riderCardTime: {
+    fontSize: 13,
+    color: "#64748b",
+  },
+
+  // Table (customer / restaurant)
   tableWrap: {
     backgroundColor: "#fff",
     borderRadius: 16,

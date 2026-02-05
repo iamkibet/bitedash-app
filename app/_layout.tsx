@@ -91,7 +91,11 @@ export default function RootLayout() {
           />
           <Stack.Screen
             name="rider/orders/[id]"
-            options={{ headerShown: true, title: "Delivery" }}
+            options={{
+              headerShown: true,
+              title: "Delivery",
+              headerBackTitleVisible: false,
+            }}
           />
           <Stack.Screen
             name="favourites"

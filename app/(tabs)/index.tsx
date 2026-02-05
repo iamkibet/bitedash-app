@@ -42,6 +42,7 @@ import { IconSymbol } from "@/components/ui/icon-symbol";
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const HOME_PADDING = 20;
 const PRIMARY_YELLOW = "#f59e0b";
+const RIDER_PAD = 20;
 const TAB_BAR_PADDING_BOTTOM = 24;
 
 const STORE_CARD_WIDTH = 148;
@@ -890,6 +891,7 @@ function HomeRestaurant() {
 /** Rider: Available orders + recent deliveries */
 function HomeRider() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [availableOrders, setAvailableOrders] = useState<Order[]>([]);
   const [recentDeliveries, setRecentDeliveries] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -932,101 +934,139 @@ function HomeRider() {
     }
   };
 
+  const bottomPad = Math.max(insets.bottom, TAB_BAR_PADDING_BOTTOM) + 24;
+
   return (
-    <View style={styles.container}>
+    <View style={styles.riderContainer}>
       <ScrollView
         style={styles.riderScroll}
-        contentContainerStyle={styles.riderScrollContent}
+        contentContainerStyle={[styles.riderScrollContent, { paddingBottom: bottomPad }]}
+        showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => load(true)}
-            tintColor="#ed751a"
-          />
-        }
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => load(true)}
+              tintColor={PRIMARY_YELLOW}
+            />
+          }
       >
-        <View style={styles.header}>
-          <Text style={styles.title}>Available orders</Text>
-          <Text style={styles.subtitle}>Accept deliveries and earn</Text>
+        {/* Hero */}
+        <View style={[styles.riderHero, { paddingTop: insets.top + 20 }]}>
+          <View style={styles.riderHeroIconWrap}>
+            <IconSymbol name="shippingbox.fill" size={32} color="#fff" />
+          </View>
+          <Text style={styles.riderHeroTitle}>Ready to deliver</Text>
+          <Text style={styles.riderHeroSubtitle}>
+            {availableOrders.length > 0
+              ? `${availableOrders.length} order${availableOrders.length === 1 ? "" : "s"} waiting`
+              : "Accept deliveries and earn"}
+          </Text>
         </View>
-        {loading ? (
-          <View style={styles.centered}>
-            <ActivityIndicator size="small" color="#ed751a" />
-          </View>
-        ) : availableOrders.length === 0 ? (
-          <View style={styles.riderEmpty}>
-            <Text style={styles.emptyText}>No available orders right now.</Text>
-          </View>
-        ) : (
-          availableOrders.map((item) => (
-            <View key={item.id} style={styles.orderCard}>
-              <View style={styles.orderRow}>
-                <Text style={styles.orderId}>Order #{item.id}</Text>
-                <Text style={styles.orderTime}>{formatRelative(item.created_at)}</Text>
-              </View>
-              <Text style={styles.orderAmount}>{formatKES(item.total_amount)}</Text>
-              <View style={styles.orderBadge}>
-                <Text style={styles.orderBadgeText}>{item.status}</Text>
-              </View>
-              <View style={styles.orderActions}>
-                <TouchableOpacity
-                  style={styles.orderOutlineBtn}
-                  onPress={() => router.push(`/rider/orders/${item.id}`)}
-                >
-                  <Text style={styles.orderOutlineBtnText}>View</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.orderPrimaryBtn,
-                    acceptingId === item.id && styles.btnDisabled,
-                  ]}
-                  onPress={() => handleAccept(item.id)}
-                  disabled={acceptingId === item.id}
-                >
-                  {acceptingId === item.id ? (
-                    <ActivityIndicator color="#fff" size="small" />
-                  ) : (
-                    <Text style={styles.orderPrimaryBtnText}>Accept</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
-          ))
-        )}
 
-        <View style={styles.restaurantSectionHeader}>
-          <Text style={styles.sectionTitle}>My recent deliveries</Text>
-          <TouchableOpacity
-            onPress={() => router.push("/(tabs)/orders")}
-            hitSlop={8}
-          >
-            <Text style={styles.sectionLink}>View all</Text>
-          </TouchableOpacity>
-        </View>
-        {recentDeliveries.length === 0 ? (
-          <View style={styles.recentOrdersEmptyRestaurant}>
-            <Text style={styles.recentOrdersEmptyText}>No deliveries yet</Text>
-          </View>
-        ) : (
-          recentDeliveries.map((order) => (
-            <TouchableOpacity
-              key={order.id}
-              style={styles.recentOrderRow}
-              onPress={() => router.push(`/rider/orders/${order.id}`)}
-              activeOpacity={0.8}
-            >
-              <View style={styles.recentOrderLeft}>
-                <Text style={styles.recentOrderId}>Order #{order.id}</Text>
-                <Text style={styles.recentOrderMeta}>
-                  {ORDER_STATUS_LABELS[order.status] ?? order.status} · {formatRelative(order.created_at)}
-                </Text>
+        {/* Content */}
+        <View style={styles.riderContent}>
+          {loading ? (
+            <View style={styles.riderLoading}>
+              <ActivityIndicator size="large" color={PRIMARY_YELLOW} />
+            </View>
+          ) : availableOrders.length === 0 ? (
+            <View style={styles.riderEmptyWrap}>
+              <View style={styles.riderEmptyIconWrap}>
+                <IconSymbol name="shippingbox.fill" size={44} color="#cbd5e1" />
               </View>
-              <Text style={styles.recentOrderAmount}>
-                {formatKES(order.total_amount)}
+              <Text style={styles.riderEmptyTitle}>No orders right now</Text>
+              <Text style={styles.riderEmptySubtext}>
+                New deliveries will appear here. Pull down to refresh.
               </Text>
+            </View>
+          ) : (
+            <>
+              <View style={styles.riderSectionHeader}>
+                <Text style={styles.riderSectionTitle}>Available</Text>
+                <View style={styles.riderCountBadge}>
+                  <Text style={styles.riderCountBadgeText}>{availableOrders.length}</Text>
+                </View>
+              </View>
+              {availableOrders.map((item) => (
+                <View key={item.id} style={styles.riderOrderCard}>
+                  <View style={styles.riderOrderHeader}>
+                    <Text style={styles.riderOrderId}>Order #{item.id}</Text>
+                    <Text style={styles.riderOrderTime}>{formatRelative(item.created_at)}</Text>
+                  </View>
+                  {item.restaurant?.name && (
+                    <View style={styles.riderOrderMetaRow}>
+                      <IconSymbol name="storefront.fill" size={14} color="#64748b" />
+                      <Text style={styles.riderOrderMeta} numberOfLines={1}>
+                        {item.restaurant.name}
+                      </Text>
+                    </View>
+                  )}
+                  {item.delivery_address && (
+                    <View style={styles.riderOrderMetaRow}>
+                      <IconSymbol name="mappin" size={14} color="#64748b" />
+                      <Text style={styles.riderOrderMeta} numberOfLines={1}>
+                        {item.delivery_address}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={styles.riderOrderFooter}>
+                    <Text style={styles.riderOrderAmount}>{formatKES(item.total_amount)}</Text>
+                    <TouchableOpacity
+                        style={[
+                          styles.riderAcceptBtn,
+                          acceptingId === item.id && styles.riderAcceptBtnDisabled,
+                        ]}
+                        onPress={() => handleAccept(item.id)}
+                        disabled={acceptingId === item.id}
+                        activeOpacity={0.88}
+                      >
+                        {acceptingId === item.id ? (
+                          <ActivityIndicator color="#fff" size="small" />
+                        ) : (
+                          <Text style={styles.riderAcceptBtnText}>Accept</Text>
+                        )}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </>
+          )}
+
+          {/* Recent deliveries */}
+          <View style={[styles.riderSectionHeader, { marginTop: 28 }]}>
+            <Text style={styles.riderSectionTitle}>Recent deliveries</Text>
+            <TouchableOpacity
+              onPress={() => router.push("/(tabs)/orders")}
+              hitSlop={8}
+            >
+              <Text style={styles.riderSectionLink}>View all</Text>
             </TouchableOpacity>
-          ))
-        )}
+          </View>
+          {recentDeliveries.length === 0 ? (
+            <View style={styles.riderRecentEmpty}>
+              <Text style={styles.riderRecentEmptyText}>No deliveries yet</Text>
+            </View>
+          ) : (
+            recentDeliveries.map((order) => (
+              <TouchableOpacity
+                key={order.id}
+                style={styles.riderRecentCard}
+                onPress={() => router.push(`/rider/orders/${order.id}`)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.riderRecentLeft}>
+                  <Text style={styles.riderRecentId}>Order #{order.id}</Text>
+                  <Text style={styles.riderRecentMeta}>
+                    {order.restaurant?.name ?? "—"} · {ORDER_STATUS_LABELS[order.status] ?? order.status}
+                  </Text>
+                  <Text style={styles.riderRecentTime}>{formatRelative(order.created_at)}</Text>
+                </View>
+                <Text style={styles.riderRecentAmount}>{formatKES(order.total_amount)}</Text>
+                <IconSymbol name="chevron.right" size={18} color="#94a3b8" />
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
       </ScrollView>
     </View>
   );
@@ -1075,9 +1115,183 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 16,
   },
+  riderContainer: { flex: 1, backgroundColor: "#f1f5f9" },
   riderScroll: { flex: 1 },
   riderScrollContent: { paddingBottom: 32 },
-  riderEmpty: { padding: 16 },
+  riderHero: {
+    backgroundColor: PRIMARY_YELLOW,
+    paddingHorizontal: RIDER_PAD,
+    paddingBottom: 28,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+  },
+  riderHeroIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+  riderHeroTitle: {
+    fontSize: 26,
+    fontWeight: "800",
+    color: "#fff",
+    letterSpacing: -0.5,
+  },
+  riderHeroSubtitle: {
+    fontSize: 15,
+    color: "rgba(255,255,255,0.9)",
+    marginTop: 4,
+  },
+  riderContent: {
+    paddingHorizontal: RIDER_PAD,
+    paddingTop: 24,
+  },
+  riderLoading: {
+    paddingVertical: 48,
+    alignItems: "center",
+  },
+  riderEmptyWrap: {
+    alignItems: "center",
+    paddingVertical: 48,
+  },
+  riderEmptyIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "#f1f5f9",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+  riderEmptyTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#1e293b",
+    marginBottom: 6,
+  },
+  riderEmptySubtext: {
+    fontSize: 14,
+    color: "#64748b",
+    textAlign: "center",
+    lineHeight: 20,
+  },
+  riderSectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  riderSectionTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#1e293b",
+  },
+  riderCountBadge: {
+    backgroundColor: PRIMARY_YELLOW,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  riderCountBadgeText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#fff",
+  },
+  riderOrderCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  riderOrderHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  riderOrderId: { fontSize: 16, fontWeight: "700", color: "#1e293b" },
+  riderOrderTime: { fontSize: 13, color: "#64748b" },
+  riderOrderMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 6,
+  },
+  riderOrderMeta: {
+    flex: 1,
+    fontSize: 14,
+    color: "#475569",
+  },
+  riderOrderFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#f1f5f9",
+  },
+  riderOrderAmount: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: PRIMARY_YELLOW,
+  },
+  riderAcceptBtn: {
+    backgroundColor: PRIMARY_YELLOW,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    minWidth: 100,
+    alignItems: "center",
+  },
+  riderAcceptBtnDisabled: { opacity: 0.7 },
+  riderAcceptBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+  riderSectionLink: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: PRIMARY_YELLOW,
+  },
+  riderRecentEmpty: { paddingVertical: 20 },
+  riderRecentEmptyText: { fontSize: 14, color: "#94a3b8" },
+  riderRecentCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2,
+    gap: 12,
+  },
+  riderRecentLeft: { flex: 1, minWidth: 0 },
+  riderRecentId: { fontSize: 15, fontWeight: "600", color: "#1e293b" },
+  riderRecentMeta: {
+    fontSize: 13,
+    color: "#64748b",
+    marginTop: 2,
+  },
+  riderRecentTime: {
+    fontSize: 12,
+    color: "#94a3b8",
+    marginTop: 2,
+  },
+  riderRecentAmount: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#1e293b",
+  },
   // Home (customer): yellow layout + store circles + promo
   homeContainer: { flex: 1, backgroundColor: "#fff" },
   homeScroll: { flex: 1 },

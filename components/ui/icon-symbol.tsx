@@ -42,6 +42,8 @@ const MAPPING = {
   "photo.fill": "image",
   "xmark": "close",
   "pencil": "edit",
+  "shippingbox.fill": "local-shipping",
+  "mappin": "place",
 } as IconMapping;
 
 /**
