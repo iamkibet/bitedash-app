@@ -1,6 +1,34 @@
 import type { MenuItem, PaginatedResponse, Rating } from "@/types/api";
 import { apiClient } from "./client";
 
+/** Build FormData for menu item create/update when image file is provided */
+function buildMenuItemFormData(
+  body: Record<string, unknown>,
+  imageUri: string | null
+): FormData {
+  const form = new FormData();
+  Object.entries(body).forEach(([k, v]) => {
+    if (v === undefined || v === null || k === "image" || k === "image_url")
+      return;
+    // FormData sends strings; Laravel boolean validation expects "1"/"0" not "true"/"false"
+    if (typeof v === "boolean") {
+      form.append(k, v ? "1" : "0");
+    } else {
+      form.append(k, String(v));
+    }
+  });
+  if (imageUri) {
+    form.append("image", {
+      uri: imageUri,
+      name: "image.jpg",
+      type: "image/jpeg",
+    } as unknown as Blob);
+  } else if (body.image_url && typeof body.image_url === "string") {
+    form.append("image_url", body.image_url);
+  }
+  return form;
+}
+
 interface RatingsMeta {
   current_page: number;
   last_page: number;
@@ -49,10 +77,32 @@ export interface CreateMenuItemBody {
 
 export async function createMenuItem(
   body: CreateMenuItemBody,
+  imageUri?: string | null
 ): Promise<MenuItem> {
+  const hasImage = Boolean(imageUri);
+  const payload = hasImage
+    ? buildMenuItemFormData(
+        {
+          ...body,
+          image_url: body.image_url ?? undefined,
+        } as Record<string, unknown>,
+        imageUri ?? null
+      )
+    : body;
+
   const { data } = await apiClient.post<MenuItem | { data: MenuItem }>(
     "/menu-items",
-    body,
+    payload,
+    hasImage
+      ? {
+          transformRequest: [
+            (d: unknown, h?: Record<string, string>) => {
+              if (d instanceof FormData && h) delete h["Content-Type"];
+              return d;
+            },
+          ],
+        }
+      : {}
   );
   return "data" in data ? data.data : data;
 }
@@ -60,10 +110,29 @@ export async function createMenuItem(
 export async function updateMenuItem(
   id: number,
   body: Partial<CreateMenuItemBody>,
+  imageUri?: string | null
 ): Promise<MenuItem> {
+  const hasImage = Boolean(imageUri);
+  const payload = hasImage
+    ? buildMenuItemFormData(
+        { ...body } as Record<string, unknown>,
+        imageUri ?? null
+      )
+    : body;
+
   const { data } = await apiClient.put<MenuItem | { data: MenuItem }>(
     `/menu-items/${id}`,
-    body,
+    payload,
+    hasImage
+      ? {
+          transformRequest: [
+            (d: unknown, h?: Record<string, string>) => {
+              if (d instanceof FormData && h) delete h["Content-Type"];
+              return d;
+            },
+          ],
+        }
+      : {}
   );
   return "data" in data ? data.data : data;
 }

@@ -8,63 +8,24 @@ import { useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  FlatList,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { IconSymbol } from "@/components/ui/icon-symbol";
 
 const ACCENT = "#f59e0b";
+const TABLE_PAD = 20;
 
-function getStatusStyle(status: Order["status"]) {
-  if (status === "cancelled") return { bg: "#f1f5f9", color: "#64748b" };
-  if (status === "delivered") return { bg: "#dcfce7", color: "#166534" };
-  return { bg: "#fffbeb", color: "#92400e" };
-}
-
-function OrderCard({
-  order,
-  role,
-  onPress,
-}: {
-  order: Order;
-  role: "customer" | "restaurant" | "rider";
-  onPress: () => void;
-}) {
-  const statusStyle = getStatusStyle(order.status);
-  const restaurantName = order.restaurant?.name;
-
-  return (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={onPress}
-      activeOpacity={0.82}
-    >
-      <View style={styles.cardRow}>
-        <View style={styles.cardLeft}>
-          <Text style={styles.orderId}>Order #{order.id}</Text>
-          {role === "customer" && restaurantName ? (
-            <Text style={styles.restaurantName} numberOfLines={1}>
-              {restaurantName}
-            </Text>
-          ) : null}
-          <Text style={styles.metaLine}>
-            <Text style={[styles.statusDot, { color: statusStyle.color }]}>● </Text>
-            {ORDER_STATUS_LABELS[order.status] ?? order.status}
-            <Text style={styles.metaSep}> · </Text>
-            <Text style={styles.time}>{formatRelative(order.created_at)}</Text>
-          </Text>
-        </View>
-        <Text style={styles.amount}>{formatKES(order.total_amount)}</Text>
-      </View>
-    </TouchableOpacity>
-  );
-}
+type Role = "customer" | "restaurant" | "rider";
 
 export default function OrdersScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const user = useAuthStore((s) => s.user);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -113,7 +74,7 @@ export default function OrdersScreen() {
   if (!user) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: 12 }]}>
           <Text style={styles.title}>Orders</Text>
           <Text style={styles.subtitle}>Your order history</Text>
         </View>
@@ -124,22 +85,25 @@ export default function OrdersScreen() {
     );
   }
 
+  const role: Role = (user.role ?? "customer") as Role;
   const listTitle =
-    user.role === "rider"
+    role === "rider"
       ? "My deliveries"
-      : user.role === "restaurant"
+      : role === "restaurant"
         ? "Store orders"
         : "Orders";
   const listSubtitle =
-    user.role === "rider"
+    role === "rider"
       ? "Orders you're delivering"
-      : user.role === "restaurant"
+      : role === "restaurant"
         ? "Orders for your store"
         : "Your order history";
+  const showRestaurantColumn = role === "customer" || role === "rider";
+  const bottomPad = Math.max(insets.bottom, 24);
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: 12 + insets.top }]}>
         <Text style={styles.title}>{listTitle}</Text>
         <Text style={styles.subtitle}>
           {orders.length > 0
@@ -159,25 +123,18 @@ export default function OrdersScreen() {
           </View>
           <Text style={styles.emptyTitle}>No orders yet</Text>
           <Text style={styles.emptySubtext}>
-            {user.role === "customer"
+            {role === "customer"
               ? "Orders you place will appear here."
-              : user.role === "rider"
+              : role === "rider"
                 ? "Accepted deliveries will show here."
                 : "Orders for your store will appear here."}
           </Text>
         </View>
       ) : (
-        <FlatList
-          data={orders}
-          keyExtractor={(item) => String(item.id)}
-          renderItem={({ item }) => (
-            <OrderCard
-              order={item}
-              role={user.role ?? "customer"}
-              onPress={() => handleOrderPress(item)}
-            />
-          )}
-          contentContainerStyle={styles.list}
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomPad }]}
+          showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -185,22 +142,99 @@ export default function OrdersScreen() {
               tintColor={ACCENT}
             />
           }
-        />
+        >
+          <View style={styles.tableWrap}>
+            {/* Table header */}
+            <View style={styles.tableHeader}>
+              <View style={[styles.th, styles.thOrder]}>
+                <Text style={styles.thText}>Order</Text>
+              </View>
+              {showRestaurantColumn && (
+                <View style={[styles.th, styles.thRestaurant]}>
+                  <Text style={styles.thText}>
+                    {role === "rider" ? "Store" : "Restaurant"}
+                  </Text>
+                </View>
+              )}
+              <View style={[styles.th, styles.thStatus]}>
+                <Text style={styles.thText}>Status</Text>
+              </View>
+              <View style={[styles.th, styles.thTime]}>
+                <Text style={styles.thText}>Time</Text>
+              </View>
+              <View style={[styles.th, styles.thAmount]}>
+                <Text style={[styles.thText, styles.thAmountText]}>Amount</Text>
+              </View>
+              <View style={[styles.th, styles.thAction]}>
+                <Text style={styles.thText} />
+              </View>
+            </View>
+
+            {/* Table rows */}
+            {orders.map((order, index) => (
+              <TouchableOpacity
+                key={order.id}
+                style={[
+                  styles.tr,
+                  index % 2 === 1 && styles.trAlt,
+                  index === orders.length - 1 && styles.trLast,
+                ]}
+                onPress={() => handleOrderPress(order)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.td, styles.tdOrder]}>
+                  <Text style={styles.orderIdText}>#{order.id}</Text>
+                </View>
+                {showRestaurantColumn && (
+                  <View style={[styles.td, styles.tdRestaurant]}>
+                    <Text
+                      style={styles.restaurantText}
+                      numberOfLines={1}
+                    >
+                      {order.restaurant?.name ?? "—"}
+                    </Text>
+                  </View>
+                )}
+                <View style={[styles.td, styles.tdStatus]}>
+                  <Text style={styles.statusText}>
+                    {ORDER_STATUS_LABELS[order.status] ?? order.status}
+                  </Text>
+                </View>
+                <View style={[styles.td, styles.tdTime]}>
+                  <Text style={styles.timeText} numberOfLines={1}>
+                    {formatRelative(order.created_at)}
+                  </Text>
+                </View>
+                <View style={[styles.td, styles.tdAmount]}>
+                  <Text style={styles.amountText}>
+                    {order.total_amount.toLocaleString("en-KE")}
+                  </Text>
+                </View>
+                <View style={[styles.td, styles.tdAction]}>
+                  <IconSymbol name="chevron.right" size={18} color="#94a3b8" />
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
       )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fafafa" },
+  container: { flex: 1, backgroundColor: "#f8fafc" },
   header: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 16,
+    paddingHorizontal: TABLE_PAD,
+    paddingBottom: 20,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#e2e8f0",
   },
-  title: { fontSize: 22, fontWeight: "700", color: "#111" },
-  subtitle: { fontSize: 13, color: "#6b7280", marginTop: 2 },
-  list: { paddingHorizontal: 16, paddingBottom: 24 },
+  title: { fontSize: 24, fontWeight: "700", color: "#0f172a" },
+  subtitle: { fontSize: 14, color: "#64748b", marginTop: 4 },
+  scroll: { flex: 1 },
+  scrollContent: { paddingHorizontal: TABLE_PAD, paddingTop: 20 },
   centered: { flex: 1, justifyContent: "center", alignItems: "center" },
   emptyWrap: {
     flex: 1,
@@ -209,50 +243,95 @@ const styles = StyleSheet.create({
     padding: 32,
   },
   emptyIconWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: "#f0f0f0",
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "#f1f5f9",
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 20,
   },
-  emptyIcon: { fontSize: 32 },
-  emptyTitle: { fontSize: 17, fontWeight: "600", color: "#111", marginBottom: 6 },
+  emptyIcon: { fontSize: 36 },
+  emptyTitle: { fontSize: 18, fontWeight: "600", color: "#0f172a", marginBottom: 8 },
   emptySubtext: {
     fontSize: 14,
-    color: "#6b7280",
+    color: "#64748b",
     textAlign: "center",
-    lineHeight: 20,
+    lineHeight: 22,
   },
-  emptyText: { color: "#6b7280", fontSize: 14 },
-  card: {
+  emptyText: { color: "#64748b", fontSize: 14 },
+
+  // Table
+  tableWrap: {
     backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
+    borderRadius: 16,
+    overflow: "hidden",
     borderWidth: 1,
-    borderColor: "#f0f0f0",
+    borderColor: "#e2e8f0",
+    shadowColor: "#0f172a",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  cardRow: {
+  tableHeader: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: "#f8fafc",
+    borderBottomWidth: 2,
+    borderBottomColor: "#e2e8f0",
   },
-  cardLeft: { flex: 1, minWidth: 0 },
-  orderId: { fontSize: 15, fontWeight: "600", color: "#111" },
-  restaurantName: {
-    fontSize: 13,
-    color: "#6b7280",
-    marginTop: 2,
+  th: {
+    paddingRight: 12,
   },
-  metaLine: {
-    fontSize: 12,
-    color: "#6b7280",
-    marginTop: 6,
+  thText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
   },
-  statusDot: { fontSize: 8 },
-  metaSep: { color: "#d1d5db" },
-  time: { color: "#9ca3af" },
-  amount: { fontSize: 16, fontWeight: "700", color: ACCENT },
+  thAmountText: { textAlign: "right" },
+  thOrder: { flex: 0.9 },
+  thRestaurant: { flex: 1.4 },
+  thStatus: { flex: 1.1 },
+  thTime: { flex: 0.95 },
+  thAmount: { flex: 0.85 },
+  thAction: { flex: 0.35, paddingRight: 0 },
+
+  tr: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+  },
+  trAlt: {
+    backgroundColor: "#fafbfc",
+  },
+  trLast: {
+    borderBottomWidth: 0,
+  },
+  td: {
+    paddingRight: 12,
+  },
+  tdOrder: { flex: 0.9 },
+  orderIdText: { fontSize: 15, fontWeight: "700", color: "#0f172a" },
+  tdRestaurant: { flex: 1.4 },
+  restaurantText: { fontSize: 13, color: "#475569" },
+  tdStatus: { flex: 1.1 },
+  statusText: { fontSize: 13, fontWeight: "500", color: "#475569" },
+  tdTime: { flex: 0.95 },
+  timeText: { fontSize: 12, color: "#64748b" },
+  tdAmount: { flex: 0.85 },
+  amountText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: ACCENT,
+    textAlign: "right",
+  },
+  tdAction: { flex: 0.35, paddingRight: 0, alignItems: "flex-end" },
 });

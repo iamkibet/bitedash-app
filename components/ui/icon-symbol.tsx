@@ -34,6 +34,14 @@ const MAPPING = {
   "bell.fill": "notifications",
   "gearshape.fill": "settings",
   "plus": "add",
+  "power": "power-settings-new",
+  "ellipsis.circle": "more-vert",
+  "ellipsis": "more-vert",
+  "line.3.horizontal.decrease.circle": "filter-list",
+  "camera.fill": "add-a-photo",
+  "photo.fill": "image",
+  "xmark": "close",
+  "pencil": "edit",
 } as IconMapping;
 
 /**

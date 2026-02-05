@@ -26,6 +26,10 @@ export default {
       "expo-router",
       "expo-secure-store",
       [
+        "expo-image-picker",
+        { photosPermission: "BiteDash needs access to your photos to add menu item images." },
+      ],
+      [
         "expo-splash-screen",
         {
           image: "./assets/images/splash-icon.png",

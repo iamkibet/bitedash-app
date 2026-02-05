@@ -9,11 +9,14 @@ export default function IndexScreen() {
 
   useEffect(() => {
     if (!isHydrated) return;
-    if (user) {
-      router.replace("/(tabs)");
-    } else {
-      router.replace("/(auth)/login");
-    }
+    const t = setTimeout(() => {
+      if (user) {
+        router.replace("/(tabs)");
+      } else {
+        router.replace("/(auth)/login");
+      }
+    }, 0);
+    return () => clearTimeout(t);
   }, [isHydrated, user, router]);
 
   return (

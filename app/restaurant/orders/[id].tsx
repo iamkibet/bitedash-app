@@ -7,18 +7,24 @@ import type { Order, User } from "@/types/api";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { IconSymbol } from "@/components/ui/icon-symbol";
+
+const ACCENT = "#f59e0b";
+const PAD = 20;
 
 export default function RestaurantOrderDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [order, setOrder] = useState<Order | null>(null);
   const [riders, setRiders] = useState<User[]>([]);
   const [selectedRiderId, setSelectedRiderId] = useState<string>("");
@@ -70,175 +76,391 @@ export default function RestaurantOrderDetailScreen() {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#ed751a" />
+        <ActivityIndicator size="large" color={ACCENT} />
       </View>
     );
   }
 
   if (!order) {
     return (
-      <View style={styles.centered}>
+      <View style={[styles.centered, styles.container]}>
         <Text style={styles.emptyText}>Order not found.</Text>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => router.back()}
+        >
+          <Text style={styles.backBtnText}>Go back</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
+  const canChangeStatus =
+    order.status !== "cancelled" && order.status !== "delivered";
+  const showRiderAssign =
+    order.status === "preparing" && !order.rider && riders.length > 0;
+  const bottomPad = Math.max(insets.bottom, 24);
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.card}>
-        <View style={styles.badgeRow}>
-          <View
-            style={[
-              styles.badge,
-              order.status === "cancelled"
-                ? styles.badgeCancelled
-                : styles.badgeActive,
-            ]}
-          >
-            <Text style={styles.badgeText}>
-              {ORDER_STATUS_LABELS[order.status]}
-            </Text>
-          </View>
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>
-              {PAYMENT_STATUS_LABELS[order.payment_status]}
-            </Text>
+    <View style={styles.container}>
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+        <TouchableOpacity
+          style={styles.headerBack}
+          onPress={() => router.back()}
+          hitSlop={12}
+        >
+          <IconSymbol name="chevron.left" size={24} color="#0f172a" />
+        </TouchableOpacity>
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>Order #{order.id}</Text>
+          <Text style={styles.headerSubtitle}>
+            {formatDate(order.created_at)}
+          </Text>
+        </View>
+        <View style={styles.headerRight} />
+      </View>
+
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.content, { paddingBottom: bottomPad + 100 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Status & payment row */}
+        <View style={styles.section}>
+          <View style={styles.statusRow}>
+            <View style={styles.statusBlock}>
+              <Text style={styles.label}>Status</Text>
+              <Text style={styles.value}>
+                {ORDER_STATUS_LABELS[order.status] ?? order.status}
+              </Text>
+            </View>
+            <View style={styles.statusDivider} />
+            <View style={styles.statusBlock}>
+              <Text style={styles.label}>Payment</Text>
+              <Text style={styles.value}>
+                {PAYMENT_STATUS_LABELS[order.payment_status] ?? order.payment_status}
+              </Text>
+            </View>
           </View>
         </View>
-        <Text style={styles.total}>Total: {formatKES(order.total_amount)}</Text>
-        <Text style={styles.meta}>
-          Placed on {formatDate(order.created_at)}
-        </Text>
-        {order.delivery_address ? (
-          <Text style={styles.meta}>Delivery: {order.delivery_address}</Text>
-        ) : null}
-        {order.notes ? (
-          <Text style={styles.meta}>Notes: {order.notes}</Text>
-        ) : null}
-        {order.rider ? (
-          <Text style={styles.meta}>Rider: {order.rider.name}</Text>
-        ) : null}
-        {order.order_items && order.order_items.length > 0 && (
-          <View style={styles.items}>
-            <Text style={styles.itemsTitle}>Items</Text>
-            {order.order_items.map((oi) => (
-              <Text key={oi.id} style={styles.itemRow}>
-                {oi.menu_item?.name ?? `Item #${oi.menu_item_id}`} ×{" "}
-                {oi.quantity} — {formatKES(oi.unit_price * oi.quantity)}
-              </Text>
-            ))}
+
+        {/* Total */}
+        <View style={styles.totalCard}>
+          <Text style={styles.totalLabel}>Total</Text>
+          <View style={styles.totalRow}>
+            <Text style={styles.totalAmount}>
+              {order.total_amount.toLocaleString("en-KE")}
+            </Text>
+            <Text style={styles.totalCurrency}>KES</Text>
           </View>
-        )}
-        {order.status !== "cancelled" && order.status !== "delivered" && (
-          <View style={styles.actions}>
-            {order.status === "pending" && (
-              <TouchableOpacity
-                style={styles.primaryBtn}
-                onPress={() => handleStatus("preparing")}
-                disabled={updating}
-              >
-                <Text style={styles.primaryBtnText}>Mark preparing</Text>
-              </TouchableOpacity>
-            )}
-            {order.status === "preparing" &&
-              !order.rider &&
-              riders.length > 0 && (
-                <View style={styles.riderRow}>
-                  <TouchableOpacity
-                    style={[
-                      styles.primaryBtn,
-                      !selectedRiderId && styles.btnDisabled,
-                    ]}
-                    onPress={handleAssignRider}
-                    disabled={updating || !selectedRiderId}
-                  >
-                    <Text style={styles.primaryBtnText}>Assign rider</Text>
-                  </TouchableOpacity>
-                  <View style={styles.picker}>
-                    {riders.map((r) => (
-                      <TouchableOpacity
-                        key={r.id}
-                        style={[
-                          styles.pickerOption,
-                          selectedRiderId === String(r.id) &&
-                            styles.pickerOptionSelected,
-                        ]}
-                        onPress={() => setSelectedRiderId(String(r.id))}
-                      >
-                        <Text style={styles.pickerOptionText}>
-                          {r.name} ({r.phone})
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
+        </View>
+
+        {/* Delivery & notes */}
+        {(order.delivery_address || order.notes) && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Delivery & notes</Text>
+            <View style={styles.infoCard}>
+              {order.delivery_address ? (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Delivery: </Text>
+                  <Text style={styles.infoText}>{order.delivery_address}</Text>
                 </View>
-              )}
+              ) : null}
+              {order.notes ? (
+                <View style={[styles.infoRow, order.delivery_address && styles.infoRowTop]}>
+                  <Text style={styles.infoLabel}>Notes: </Text>
+                  <Text style={styles.infoText}>{order.notes}</Text>
+                </View>
+              ) : null}
+            </View>
           </View>
         )}
-      </View>
-    </ScrollView>
+
+        {/* Rider */}
+        {order.rider && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Rider</Text>
+            <View style={styles.infoCard}>
+              <Text style={styles.riderName}>{order.rider.name}</Text>
+              {order.rider.phone ? (
+                <Text style={styles.riderPhone}>{order.rider.phone}</Text>
+              ) : null}
+            </View>
+          </View>
+        )}
+
+        {/* Order items */}
+        {order.order_items && order.order_items.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Items</Text>
+            <View style={styles.itemsCard}>
+              {order.order_items.map((oi, index) => (
+                <View
+                  key={oi.id}
+                  style={[
+                    styles.itemRow,
+                    index < order.order_items!.length - 1 && styles.itemRowBorder,
+                  ]}
+                >
+                  <View style={styles.itemLeft}>
+                    <Text style={styles.itemName} numberOfLines={2}>
+                      {oi.menu_item?.name ?? `Item #${oi.menu_item_id}`}
+                    </Text>
+                    <Text style={styles.itemMeta}>
+                      {oi.quantity} × {formatKES(oi.unit_price)}
+                    </Text>
+                  </View>
+                  <Text style={styles.itemTotal}>
+                    {(oi.unit_price * oi.quantity).toLocaleString("en-KE")}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Assign rider (when preparing, no rider yet) */}
+        {showRiderAssign && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Assign rider</Text>
+            <View style={styles.riderPickerCard}>
+              {riders.map((r) => (
+                <TouchableOpacity
+                  key={r.id}
+                  style={[
+                    styles.riderOption,
+                    selectedRiderId === String(r.id) && styles.riderOptionSelected,
+                  ]}
+                  onPress={() => setSelectedRiderId(String(r.id))}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.riderOptionName}>{r.name}</Text>
+                  {r.phone ? (
+                    <Text style={styles.riderOptionPhone}>{r.phone}</Text>
+                  ) : null}
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+      </ScrollView>
+
+      {/* Actions */}
+      {canChangeStatus && (
+        <View style={[styles.footer, { paddingBottom: bottomPad + 16 }]}>
+          {order.status === "pending" && (
+            <TouchableOpacity
+              style={[styles.primaryBtn, updating && styles.btnDisabled]}
+              onPress={() => handleStatus("preparing")}
+              disabled={updating}
+              activeOpacity={0.88}
+            >
+              {updating ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.primaryBtnText}>Mark preparing</Text>
+              )}
+            </TouchableOpacity>
+          )}
+          {order.status === "preparing" && !showRiderAssign && (
+            <TouchableOpacity
+              style={[styles.primaryBtn, updating && styles.btnDisabled]}
+              onPress={() => handleStatus("on_the_way")}
+              disabled={updating}
+              activeOpacity={0.88}
+            >
+              {updating ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.primaryBtnText}>Dispatch order</Text>
+              )}
+            </TouchableOpacity>
+          )}
+          {order.status === "preparing" && showRiderAssign && (
+            <TouchableOpacity
+              style={[
+                styles.primaryBtn,
+                (!selectedRiderId || updating) && styles.btnDisabled,
+              ]}
+              onPress={handleAssignRider}
+              disabled={updating || !selectedRiderId}
+              activeOpacity={0.88}
+            >
+              {updating ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.primaryBtnText}>Assign rider</Text>
+              )}
+            </TouchableOpacity>
+          )}
+          {order.status === "on_the_way" && (
+            <TouchableOpacity
+              style={[styles.primaryBtn, updating && styles.btnDisabled]}
+              onPress={() => handleStatus("delivered")}
+              disabled={updating}
+              activeOpacity={0.88}
+            >
+              {updating ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.primaryBtnText}>Mark delivered</Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f9fafb" },
-  content: { padding: 16, paddingBottom: 32 },
-  centered: { flex: 1, justifyContent: "center", alignItems: "center" },
-  emptyText: { color: "#6b7280", fontSize: 16 },
-  card: {
+  container: { flex: 1, backgroundColor: "#f8fafc" },
+  centered: { justifyContent: "center", alignItems: "center" },
+  emptyText: { color: "#64748b", fontSize: 16, marginBottom: 16 },
+  backBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    backgroundColor: ACCENT,
+    borderRadius: 10,
+  },
+  backBtnText: { color: "#fff", fontSize: 15, fontWeight: "600" },
+
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: PAD,
+    paddingBottom: 16,
     backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 20,
-    shadowColor: "#000",
+    borderBottomWidth: 1,
+    borderBottomColor: "#e2e8f0",
+  },
+  headerBack: { padding: 4, marginRight: 8 },
+  headerCenter: { flex: 1 },
+  headerTitle: { fontSize: 20, fontWeight: "700", color: "#0f172a" },
+  headerSubtitle: { fontSize: 13, color: "#64748b", marginTop: 2 },
+  headerRight: { width: 36 },
+
+  scroll: { flex: 1 },
+  content: { padding: PAD, paddingTop: 24 },
+
+  section: { marginBottom: 24 },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 10,
+  },
+  statusRow: {
+    flexDirection: "row",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    shadowColor: "#0f172a",
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
     elevation: 2,
   },
-  badgeRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    backgroundColor: "#f3f4f6",
+  statusBlock: { flex: 1 },
+  statusDivider: {
+    width: 1,
+    backgroundColor: "#e2e8f0",
+    marginHorizontal: 12,
   },
-  badgeActive: { backgroundColor: "#fef3c7" },
-  badgeCancelled: { backgroundColor: "#f3f4f6" },
-  badgeText: { fontSize: 12, fontWeight: "500", color: "#374151" },
-  total: { fontSize: 18, fontWeight: "600", color: "#111" },
-  meta: { fontSize: 14, color: "#6b7280", marginTop: 8 },
-  items: {
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: "#e5e7eb",
-  },
-  itemsTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#111",
-    marginBottom: 8,
-  },
-  itemRow: { fontSize: 14, color: "#6b7280", marginBottom: 4 },
-  actions: { marginTop: 20, gap: 12 },
-  primaryBtn: {
-    backgroundColor: "#ed751a",
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: "center",
-  },
-  primaryBtnText: { color: "#fff", fontSize: 16, fontWeight: "600" },
-  btnDisabled: { opacity: 0.6 },
-  riderRow: { gap: 12 },
-  picker: { marginTop: 8 },
-  pickerOption: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 8,
+  label: { fontSize: 11, fontWeight: "600", color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.4 },
+  value: { fontSize: 15, fontWeight: "600", color: "#0f172a", marginTop: 4 },
+
+  totalCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 24,
     borderWidth: 1,
-    borderColor: "#d1d5db",
-    marginBottom: 8,
+    borderColor: "#e2e8f0",
+    marginBottom: 24,
+    shadowColor: "#0f172a",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 2,
   },
-  pickerOptionSelected: { borderColor: "#ed751a", backgroundColor: "#fff7ed" },
-  pickerOptionText: { fontSize: 14, color: "#374151" },
+  totalLabel: { fontSize: 13, fontWeight: "600", color: "#64748b", textTransform: "uppercase", letterSpacing: 0.4 },
+  totalRow: { flexDirection: "row", alignItems: "baseline", gap: 8, marginTop: 6 },
+  totalAmount: { fontSize: 28, fontWeight: "800", color: "#0f172a" },
+  totalCurrency: { fontSize: 15, fontWeight: "600", color: "#64748b" },
+
+  infoCard: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  infoRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  infoRowTop: { marginTop: 12 },
+  infoLabel: { fontSize: 13, color: "#64748b" },
+  infoText: { flex: 1, fontSize: 14, color: "#334155" },
+  riderName: { fontSize: 15, fontWeight: "600", color: "#0f172a" },
+  riderPhone: { fontSize: 13, color: "#64748b", marginTop: 4 },
+
+  itemsCard: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    overflow: "hidden",
+  },
+  itemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  itemRowBorder: { borderBottomWidth: 1, borderBottomColor: "#f1f5f9" },
+  itemLeft: { flex: 1, minWidth: 0, marginRight: 12 },
+  itemName: { fontSize: 15, fontWeight: "500", color: "#0f172a" },
+  itemMeta: { fontSize: 13, color: "#64748b", marginTop: 2 },
+  itemTotal: { fontSize: 15, fontWeight: "600", color: "#0f172a" },
+
+  riderPickerCard: { gap: 8 },
+  riderOption: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: "#e2e8f0",
+  },
+  riderOptionSelected: {
+    borderColor: ACCENT,
+    backgroundColor: "#fffbeb",
+  },
+  riderOptionName: { fontSize: 15, fontWeight: "600", color: "#0f172a" },
+  riderOptionPhone: { fontSize: 13, color: "#64748b", marginTop: 2 },
+
+  footer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: PAD,
+    paddingTop: 16,
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderTopColor: "#e2e8f0",
+  },
+  primaryBtn: {
+    backgroundColor: ACCENT,
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 52,
+  },
+  primaryBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  btnDisabled: { opacity: 0.7 },
 });

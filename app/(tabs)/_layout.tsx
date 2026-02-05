@@ -15,8 +15,9 @@ export default function TabLayout() {
   const colorScheme = useColorScheme();
   const user = useAuthStore((s) => s.user);
   const tint = Colors[colorScheme ?? "light"].tint;
-  const role = user?.role ?? "customer";
+  const role = String(user?.role ?? "customer").toLowerCase();
   const insets = useSafeAreaInsets();
+  const isRestaurant = role === "restaurant";
   const tabBarBottomPadding = insets.bottom > 0 ? insets.bottom : 12;
 
   return (
@@ -65,6 +66,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => (
             <IconSymbol size={24} name="storefront.fill" color={color} />
           ),
+          href: isRestaurant ? null : "/(tabs)/stores",
         }}
       />
       <Tabs.Screen

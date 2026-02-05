@@ -67,11 +67,11 @@ export default function RootLayout() {
           />
           <Stack.Screen
             name="restaurant/edit"
-            options={{ headerShown: true, title: "Edit Store" }}
+            options={{ headerShown: false }}
           />
           <Stack.Screen
             name="restaurant/menu"
-            options={{ headerShown: true, title: "Menu" }}
+            options={{ headerShown: false }}
           />
           <Stack.Screen
             name="restaurant/orders"
@@ -79,15 +79,15 @@ export default function RootLayout() {
           />
           <Stack.Screen
             name="restaurant/menu/new"
-            options={{ headerShown: true, title: "New Item" }}
+            options={{ headerShown: false }}
           />
           <Stack.Screen
             name="restaurant/menu/[id]/edit"
-            options={{ headerShown: true, title: "Edit Item" }}
+            options={{ headerShown: false }}
           />
           <Stack.Screen
             name="restaurant/orders/[id]"
-            options={{ headerShown: true, title: "Order" }}
+            options={{ headerShown: false }}
           />
           <Stack.Screen
             name="rider/orders/[id]"

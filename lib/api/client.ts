@@ -45,6 +45,15 @@ function getPlatformBaseURL(): string {
 
 const baseURL = getPlatformBaseURL();
 
+/** Base origin (e.g. http://bitedash-api.test) for resolving relative image URLs */
+export function getApiOrigin(): string {
+  try {
+    return new URL(baseURL).origin;
+  } catch {
+    return "http://bitedash-api.test";
+  }
+}
+
 const AUTH_TOKEN_KEY = "bitedash_token";
 
 export const apiClient = axios.create({

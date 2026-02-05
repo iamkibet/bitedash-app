@@ -1,3 +1,4 @@
+import { MenuItemImage } from "@/components/ui/menu-item-image";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { getApiMessage } from "@/lib/api/client";
 import { addFavourite, listFavourites, removeFavourite } from "@/lib/api/favourites";
@@ -9,13 +10,12 @@ import { useCartStore } from "@/lib/store/cartStore";
 import { formatKES } from "@/lib/utils/formatters";
 import type { MenuItem, Store } from "@/types/api";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  Image,
-  Platform,
   Pressable,
+  RefreshControl,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -24,8 +24,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const ACCENT = "#f59e0b";
-const ROW_IMAGE_SIZE = 64;
-const CARD_RADIUS = 10;
+const PAD = 20;
 
 export default function StoreDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -36,26 +35,39 @@ export default function StoreDetailScreen() {
   const [favouriteIds, setFavouriteIds] = useState<Set<number>>(new Set());
   const [togglingFavId, setTogglingFavId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
+  const [refreshing, setRefreshing] = useState(false);
   const addItem = useCartStore((s) => s.addItem);
   const { showAddedToCart } = useToast();
 
+  const load = useCallback(
+    async (refresh = false) => {
+      if (!id) return;
+      const numId = Number(id);
+      if (refresh) setRefreshing(true);
+      else setLoading(true);
+      try {
+        const [storeData, menuRes, favRes] = await Promise.all([
+          getStore(numId),
+          listMenuItemsByStore(numId, { page: 1 }),
+          listFavourites({ page: 1 }),
+        ]);
+        setStore(storeData);
+        setMenuItems(menuRes.data);
+        setFavouriteIds(new Set(favRes.data.map((f) => f.menu_item_id)));
+      } catch {
+        setStore(null);
+        setMenuItems([]);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [id]
+  );
+
   useEffect(() => {
-    if (!id) return;
-    const numId = Number(id);
-    getStore(numId)
-      .then(setStore)
-      .catch(() => setStore(null));
-    listMenuItemsByStore(numId, { page: 1 })
-      .then((res) => setMenuItems(res.data))
-      .catch(() => setMenuItems([]));
-    listFavourites({ page: 1 })
-      .then((res) =>
-        setFavouriteIds(new Set(res.data.map((f) => f.menu_item_id))),
-      )
-      .catch(() => setFavouriteIds(new Set()))
-      .finally(() => setLoading(false));
-  }, [id]);
+    load();
+  }, [load]);
 
   const toggleFavourite = async (menuItemId: number) => {
     const isFav = favouriteIds.has(menuItemId);
@@ -83,295 +95,383 @@ export default function StoreDetailScreen() {
   if (loading && !store) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="small" color={ACCENT} />
+        <ActivityIndicator size="large" color={ACCENT} />
       </View>
     );
   }
 
   if (!store) {
     return (
-      <View style={styles.centered}>
+      <View style={[styles.centered, styles.container]}>
+        <View style={styles.emptyIconWrap}>
+          <IconSymbol name="storefront.fill" size={48} color="#cbd5e1" />
+        </View>
         <Text style={styles.emptyText}>Store not found.</Text>
+        <TouchableOpacity style={styles.emptyBackBtn} onPress={() => router.back()}>
+          <Text style={styles.emptyBackBtnText}>Go back</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
-  const headerTop = insets.top + (Platform.OS === "ios" ? 4 : 8);
+  const listPadding = { paddingBottom: Math.max(insets.bottom, 24) + 16 };
 
   const renderItem = ({ item }: { item: MenuItem }) => {
     const isFav = favouriteIds.has(item.id);
     const isToggling = togglingFavId === item.id;
     return (
-      <View style={styles.menuRow}>
-        <View style={styles.menuRowImageWrap}>
-          {item.image_url ? (
-            <Image source={{ uri: item.image_url }} style={styles.menuRowImage} />
-          ) : (
-            <View style={styles.menuRowPlaceholder}>
-              <Text style={styles.menuRowPlaceholderText}>🍽</Text>
-            </View>
-          )}
-        </View>
-        <View style={styles.menuRowBodyWrap}>
-          <View style={styles.menuRowBody}>
-            <Text style={styles.menuRowName} numberOfLines={1}>
-              {item.name}
-            </Text>
-            <Text style={styles.menuRowPrice}>{formatKES(item.price)}</Text>
-            <View style={styles.menuRowBadgeWrap}>
-              <View
-                style={[
-                  styles.badge,
-                  item.is_available ? styles.badgeAvail : styles.badgeUnavail,
-                ]}
-              >
-                <Text style={styles.badgeText}>
-                  {item.is_available ? "Available" : "Unavailable"}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.menuRowActions}>
-              <TouchableOpacity
-                onPress={() => router.push(`/menu/${item.id}`)}
-                hitSlop={8}
-              >
-                <Text style={styles.viewLink}>View details</Text>
-              </TouchableOpacity>
-              {item.is_available && (
-                <TouchableOpacity
-                  style={styles.addBtn}
-                  onPress={() => {
-                    addItem(item);
-                    showAddedToCart();
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.addBtnText}>Add</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-          <Pressable
-            style={({ pressed }) => [
-              styles.favBtn,
-              pressed && styles.favBtnPressed,
+      <View style={styles.card}>
+        <View style={styles.cardImageWrap}>
+          <MenuItemImage
+            imageUrl={item.image_url}
+            style={styles.cardImage}
+            placeholderIconSize={40}
+          />
+          <View
+            style={[
+              styles.availPill,
+              !item.is_available && styles.availPillOff,
             ]}
-            onPress={() => toggleFavourite(item.id)}
-            disabled={isToggling}
-            hitSlop={8}
           >
-            {isToggling ? (
-              <ActivityIndicator size="small" color="#e11d48" />
-            ) : (
-              <IconSymbol
-                name={isFav ? "heart.fill" : "heart"}
-                size={22}
-                color={isFav ? "#e11d48" : "#9ca3af"}
-              />
-            )}
-          </Pressable>
+            <Text
+              style={[
+                styles.availPillText,
+                !item.is_available && styles.availPillTextOff,
+              ]}
+            >
+              {item.is_available ? "Available" : "Unavailable"}
+            </Text>
+          </View>
         </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardName} numberOfLines={2}>
+            {item.name}
+          </Text>
+          <Text style={styles.cardPrice}>{formatKES(item.price)}</Text>
+          <View style={styles.cardActions}>
+            <TouchableOpacity
+              style={styles.viewBtn}
+              onPress={() => router.push(`/menu/${item.id}`)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.viewBtnText}>View details</Text>
+            </TouchableOpacity>
+            {item.is_available && (
+              <TouchableOpacity
+                style={styles.addBtn}
+                onPress={() => {
+                  addItem(item);
+                  showAddedToCart();
+                }}
+                activeOpacity={0.88}
+              >
+                <Text style={styles.addBtnText}>Add to cart</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+        <Pressable
+          style={({ pressed }) => [styles.favBtn, pressed && styles.favBtnPressed]}
+          onPress={() => toggleFavourite(item.id)}
+          disabled={isToggling}
+          hitSlop={8}
+        >
+          {isToggling ? (
+            <ActivityIndicator size="small" color="#e11d48" />
+          ) : (
+            <IconSymbol
+              name={isFav ? "heart.fill" : "heart"}
+              size={22}
+              color={isFav ? "#e11d48" : "#9ca3af"}
+            />
+          )}
+        </Pressable>
       </View>
     );
   };
 
   return (
     <View style={styles.container}>
-      {/* Custom header: minimal back + title */}
-      <View style={[styles.header, { paddingTop: headerTop }]}>
-        <Pressable
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+        <TouchableOpacity
+          style={styles.headerBack}
           onPress={() => router.back()}
-          style={styles.backBtn}
           hitSlop={12}
-          accessibilityLabel="Go back"
         >
-          <IconSymbol name="chevron.left" size={22} color="#374151" />
-        </Pressable>
+          <IconSymbol name="chevron.left" size={24} color="#0f172a" />
+        </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
           {store.name}
         </Text>
-        <View style={styles.backBtn} />
+        <View style={styles.headerRight} />
       </View>
 
-      {/* Compact store strip (no big hero) */}
-      <View style={styles.storeStrip}>
-        {store.image_url ? (
-          <Image source={{ uri: store.image_url }} style={styles.storeStripImg} />
-        ) : (
-          <View style={[styles.storeStripImg, styles.storeStripPlaceholder]}>
-            <Text style={styles.placeholderText}>Store</Text>
-          </View>
-        )}
-        <View style={styles.storeStripInfo}>
-          <Text style={styles.storeStripName} numberOfLines={1}>
-            {store.name}
-          </Text>
-          <Text style={styles.storeStripDesc} numberOfLines={1}>
-            {store.description ?? store.location}
-          </Text>
-          <View
-            style={[
-              styles.badge,
-              store.is_open ? styles.badgeOpen : styles.badgeClosed,
-            ]}
-          >
-            <Text style={styles.badgeText}>
-              {store.is_open
-                ? STORE_STATUS_LABELS.open
-                : STORE_STATUS_LABELS.closed}
-            </Text>
-          </View>
-        </View>
-      </View>
+      <FlatList
+        data={menuItems}
+        keyExtractor={(item) => String(item.id)}
+        renderItem={renderItem}
+        contentContainerStyle={[styles.list, listPadding]}
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={
+          <>
+            {/* Store hero */}
+            <View style={styles.hero}>
+              <View style={styles.heroImageWrap}>
+                <MenuItemImage
+                  imageUrl={store.image_url}
+                  style={styles.heroImage}
+                  placeholderIcon="storefront.fill"
+                  placeholderIconSize={48}
+                />
+                <View
+                  style={[
+                    styles.storeBadge,
+                    store.is_open ? styles.storeBadgeOpen : styles.storeBadgeClosed,
+                  ]}
+                >
+                  <Text style={styles.storeBadgeText}>
+                    {store.is_open
+                      ? STORE_STATUS_LABELS.open
+                      : STORE_STATUS_LABELS.closed}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.heroInfo}>
+                <Text style={styles.heroName}>{store.name}</Text>
+                {(store.description || store.location) && (
+                  <Text style={styles.heroDesc} numberOfLines={2}>
+                    {store.description ?? store.location}
+                  </Text>
+                )}
+              </View>
+            </View>
 
-      <Text style={styles.sectionTitle}>Menu</Text>
-      {menuItems.length === 0 ? (
-        <Text style={styles.emptyMenu}>No menu items yet.</Text>
-      ) : (
-        <FlatList
-          data={menuItems}
-          keyExtractor={(item) => String(item.id)}
-          renderItem={renderItem}
-          contentContainerStyle={styles.list}
-        />
-      )}
+            {/* Menu section header */}
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Menu</Text>
+              {menuItems.length > 0 && (
+                <Text style={styles.sectionCount}>
+                  {menuItems.length} item{menuItems.length === 1 ? "" : "s"}
+                </Text>
+              )}
+            </View>
+
+            {menuItems.length === 0 && (
+              <View style={styles.emptyMenuWrap}>
+                <View style={styles.emptyMenuIconWrap}>
+                  <IconSymbol name="menucard.fill" size={40} color="#cbd5e1" />
+                </View>
+                <Text style={styles.emptyMenuTitle}>No menu items yet</Text>
+                <Text style={styles.emptyMenuSubtext}>
+                  This store hasn&apos;t added any dishes. Check back later.
+                </Text>
+              </View>
+            )}
+          </>
+        }
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => load(true)}
+            tintColor={ACCENT}
+          />
+        }
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fafafa" },
+  container: { flex: 1, backgroundColor: "#f8fafc" },
   centered: { flex: 1, justifyContent: "center", alignItems: "center" },
-  emptyText: { color: "#6b7280", fontSize: 14 },
-  // Header
+
   header: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 4,
-    paddingBottom: 10,
+    paddingHorizontal: PAD,
+    paddingBottom: 16,
     backgroundColor: "#fff",
     borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
+    borderBottomColor: "#e2e8f0",
   },
-  backBtn: {
-    width: 44,
-    height: 44,
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  headerBack: { padding: 4, marginRight: 8 },
   headerTitle: {
     flex: 1,
-    fontSize: 17,
-    fontWeight: "600",
-    color: "#111",
-    textAlign: "center",
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#0f172a",
   },
-  // Store strip (compact, not a big hero)
-  storeStrip: {
-    flexDirection: "row",
-    backgroundColor: "#fff",
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
-  },
-  storeStripImg: {
+  headerRight: { width: 36 },
+
+  emptyIconWrap: {
     width: 80,
     height: 80,
-    borderRadius: 10,
-    backgroundColor: "#f0f0f0",
-  },
-  storeStripPlaceholder: {
+    borderRadius: 40,
+    backgroundColor: "#f1f5f9",
     justifyContent: "center",
     alignItems: "center",
+    marginBottom: 16,
   },
-  placeholderText: { color: "#9ca3af", fontSize: 12 },
-  storeStripInfo: {
-    flex: 1,
-    marginLeft: 12,
-    justifyContent: "center",
-    minWidth: 0,
+  emptyText: { fontSize: 16, color: "#64748b", marginBottom: 8 },
+  emptyBackBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    marginTop: 8,
   },
-  storeStripName: { fontSize: 16, fontWeight: "600", color: "#111" },
-  storeStripDesc: { fontSize: 12, color: "#6b7280", marginTop: 2 },
-  badge: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginTop: 6,
-  },
-  badgeOpen: { backgroundColor: "#dcfce7" },
-  badgeClosed: { backgroundColor: "#f1f5f9" },
-  badgeAvail: { backgroundColor: "#dcfce7" },
-  badgeUnavail: { backgroundColor: "#f1f5f9" },
-  badgeText: { fontSize: 11, fontWeight: "500", color: "#374151" },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#6b7280",
-    marginTop: 16,
-    marginBottom: 8,
-    marginHorizontal: 16,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  list: { paddingHorizontal: 16, paddingBottom: 24 },
-  emptyMenu: { color: "#6b7280", fontSize: 14, marginHorizontal: 16 },
-  // Menu row
-  menuRow: {
-    flexDirection: "row",
+  emptyBackBtnText: { fontSize: 15, fontWeight: "600", color: ACCENT },
+
+  hero: {
     backgroundColor: "#fff",
-    borderRadius: CARD_RADIUS,
-    padding: 10,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: "#f0f0f0",
-  },
-  menuRowImageWrap: {
-    width: ROW_IMAGE_SIZE,
-    height: ROW_IMAGE_SIZE,
-    borderRadius: 8,
+    marginHorizontal: PAD,
+    marginTop: 20,
+    borderRadius: 16,
     overflow: "hidden",
-    backgroundColor: "#f0f0f0",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    shadowColor: "#0f172a",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  menuRowImage: { width: "100%", height: "100%" },
-  menuRowPlaceholder: {
+  heroImageWrap: {
+    position: "relative",
+    height: 160,
+  },
+  heroImage: {
     width: "100%",
     height: "100%",
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+  },
+  storeBadge: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  storeBadgeOpen: { backgroundColor: "rgba(34, 197, 94, 0.95)" },
+  storeBadgeClosed: { backgroundColor: "rgba(100, 116, 139, 0.9)" },
+  storeBadgeText: { fontSize: 12, fontWeight: "600", color: "#fff" },
+  heroInfo: { padding: PAD },
+  heroName: { fontSize: 20, fontWeight: "700", color: "#0f172a" },
+  heroDesc: {
+    fontSize: 14,
+    color: "#64748b",
+    marginTop: 6,
+    lineHeight: 20,
+  },
+
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    marginTop: 24,
+    marginBottom: 12,
+    marginHorizontal: PAD,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#0f172a",
+  },
+  sectionCount: {
+    fontSize: 13,
+    color: "#64748b",
+  },
+
+  emptyMenuWrap: {
+    alignItems: "center",
+    paddingVertical: 40,
+    paddingHorizontal: 32,
+  },
+  emptyMenuIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#f1f5f9",
     justifyContent: "center",
     alignItems: "center",
+    marginBottom: 16,
   },
-  menuRowPlaceholderText: { fontSize: 24 },
-  menuRowBodyWrap: {
-    flex: 1,
+  emptyMenuTitle: {
+    fontSize: 17,
+    fontWeight: "600",
+    color: "#334155",
+    marginBottom: 6,
+  },
+  emptyMenuSubtext: {
+    fontSize: 14,
+    color: "#94a3b8",
+    textAlign: "center",
+    lineHeight: 20,
+  },
+
+  list: { paddingHorizontal: PAD },
+  card: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    marginLeft: 12,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    overflow: "hidden",
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    shadowColor: "#0f172a",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  cardImageWrap: {
+    position: "relative",
+    width: 100,
+    height: 100,
+  },
+  cardImage: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: "#f1f5f9",
+  },
+  availPill: {
+    position: "absolute",
+    bottom: 6,
+    left: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: "rgba(34, 197, 94, 0.95)",
+  },
+  availPillOff: { backgroundColor: "rgba(100, 116, 139, 0.9)" },
+  availPillText: { fontSize: 10, fontWeight: "600", color: "#fff" },
+  availPillTextOff: { color: "#fff" },
+  cardBody: {
+    flex: 1,
+    padding: 14,
     minWidth: 0,
   },
-  menuRowBody: { flex: 1, minWidth: 0 },
-  favBtn: {
-    padding: 6,
-    marginTop: 2,
-  },
-  favBtnPressed: { opacity: 0.7 },
-  menuRowName: { fontSize: 15, fontWeight: "600", color: "#111" },
-  menuRowPrice: { fontSize: 13, color: ACCENT, fontWeight: "600", marginTop: 2 },
-  menuRowBadgeWrap: { marginTop: 4 },
-  menuRowActions: {
+  cardName: { fontSize: 16, fontWeight: "600", color: "#0f172a" },
+  cardPrice: { fontSize: 15, fontWeight: "600", color: ACCENT, marginTop: 4 },
+  cardActions: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 8,
-    gap: 8,
+    gap: 10,
+    marginTop: 10,
   },
-  viewLink: { fontSize: 13, color: ACCENT, fontWeight: "500" },
+  viewBtn: { paddingVertical: 4 },
+  viewBtnText: { fontSize: 13, fontWeight: "600", color: ACCENT },
   addBtn: {
     backgroundColor: ACCENT,
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 10,
   },
   addBtnText: { fontSize: 13, fontWeight: "600", color: "#fff" },
+  favBtn: {
+    padding: 12,
+    justifyContent: "center",
+  },
+  favBtnPressed: { opacity: 0.7 },
 });

@@ -7,8 +7,9 @@ import {
   listMyRestaurantOrders,
   listMyRiderOrders,
   listOrders,
+  updateOrder,
 } from "@/lib/api/orders";
-import { getMyStore, listStores } from "@/lib/api/stores";
+import { getMyStore, listStores, toggleStoreStatus } from "@/lib/api/stores";
 import {
   ORDER_STATUS_LABELS,
   STORE_STATUS_LABELS,
@@ -17,7 +18,7 @@ import { useAuthStore } from "@/lib/store/authStore";
 import { useCartStore } from "@/lib/store/cartStore";
 import { useDeliveryLocationStore } from "@/lib/store/deliveryLocationStore";
 import { formatKES, formatRelative } from "@/lib/utils/formatters";
-import type { Favourite, MenuItem, Order, Store } from "@/types/api";
+import type { Favourite, MenuItem, Order, PaginationMeta, Store } from "@/types/api";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -26,6 +27,7 @@ import {
   Dimensions,
   FlatList,
   Image,
+  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -34,6 +36,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -48,6 +51,7 @@ const DISH_CARD_WIDTH = 160;
 const DISH_CARD_MARGIN = 12;
 const HOME_MENU_STORES_LIMIT = 5;
 const HOME_DISHES_LIMIT = 20;
+const STORE_DASHBOARD_CARD_RADIUS = 14;
 
 type CarouselItem = Store | { id: "view-all" };
 type DishWithStore = MenuItem & { storeName?: string };
@@ -455,43 +459,115 @@ function HomeDashboard() {
   );
 }
 
-/** Restaurant: My Store dashboard + recent orders */
+type EarningsPeriod = "all" | "month" | "week";
+
+function getEarningsForPeriod(orders: Order[], period: EarningsPeriod): number {
+  if (period === "all") {
+    return orders.reduce((sum, o) => sum + (o.payment_status === "paid" ? o.total_amount : 0), 0);
+  }
+  const now = new Date();
+  let start: Date;
+  if (period === "month") {
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+  } else {
+    const day = now.getDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    start = new Date(now);
+    start.setDate(now.getDate() + mondayOffset);
+    start.setHours(0, 0, 0, 0);
+  }
+  const startMs = start.getTime();
+  const endMs = now.getTime();
+  return orders.reduce((sum, o) => {
+    if (o.payment_status !== "paid") return sum;
+    const orderTime = new Date(o.created_at).getTime();
+    return orderTime >= startMs && orderTime <= endMs ? sum + o.total_amount : sum;
+  }, 0);
+}
+
+/** Restaurant: Full store dashboard on Home – power, menu, orders table */
 function HomeRestaurant() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [store, setStore] = useState<Store | null>(null);
-  const [recentOrders, setRecentOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [ordersMeta, setOrdersMeta] = useState<PaginationMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const [togglingStatus, setTogglingStatus] = useState(false);
+  const [updatingOrderId, setUpdatingOrderId] = useState<number | null>(null);
+  const [earningsPeriod, setEarningsPeriod] = useState<EarningsPeriod>("all");
+  const [earningsFilterOpen, setEarningsFilterOpen] = useState(false);
+  const [orderMenuOrderId, setOrderMenuOrderId] = useState<number | null>(null);
 
-  const load = (isRefresh = false) => {
-    if (!isRefresh) setLoading(true);
-    else setRefreshing(true);
-    getMyStore()
-      .then((s) => {
-        setStore(s);
-        listMyRestaurantOrders({ page: 1 })
-          .then((res) => setRecentOrders(res.data.slice(0, 5)))
-          .catch(() => {});
-      })
-      .catch((e) => {
-        if (e.response?.status === 404) setNotFound(true);
-        else Alert.alert("Error", getApiMessage(e));
-      })
-      .finally(() => {
-        setLoading(false);
-        setRefreshing(false);
-      });
-  };
+  const earningsPeriodLabel =
+    earningsPeriod === "all" ? "All time" : earningsPeriod === "week" ? "This week" : "This month";
 
-  useEffect(() => {
-    load();
+  const load = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+    try {
+      const [storeRes, ordersRes] = await Promise.all([
+        getMyStore(),
+        listMyRestaurantOrders({ page: 1 }),
+      ]);
+      setStore(storeRes);
+      setOrders(ordersRes.data);
+      setOrdersMeta(ordersRes.meta ?? null);
+    } catch (e) {
+      if ((e as { response?: { status: number } })?.response?.status === 404) {
+        setNotFound(true);
+        setStore(null);
+      } else {
+        Alert.alert("Error", getApiMessage(e));
+      }
+      setOrders([]);
+      setOrdersMeta(null);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
-  if (loading) {
+  useEffect(() => {
+    if (notFound) return;
+    load();
+  }, [load, notFound]);
+
+  const totalOrders = ordersMeta?.total ?? 0;
+  const totalEarnings = getEarningsForPeriod(orders, earningsPeriod);
+  const menuOrder = orderMenuOrderId != null ? orders.find((o) => o.id === orderMenuOrderId) : null;
+
+  const handleToggleOpen = useCallback(async () => {
+    if (!store || togglingStatus) return;
+    setTogglingStatus(true);
+    try {
+      const updated = await toggleStoreStatus(store.id);
+      setStore(updated);
+    } catch (e) {
+      Alert.alert("Error", getApiMessage(e));
+    } finally {
+      setTogglingStatus(false);
+    }
+  }, [store, togglingStatus]);
+
+  const handleOrderStatus = useCallback(async (order: Order, newStatus: Order["status"]) => {
+    setUpdatingOrderId(order.id);
+    try {
+      const updated = await updateOrder(order.id, { status: newStatus });
+      setOrders((prev) => prev.map((o) => (o.id === order.id ? updated : o)));
+    } catch (e) {
+      Alert.alert("Error", getApiMessage(e));
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  }, []);
+
+  if (loading && !store) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#ed751a" />
+        <ActivityIndicator size="small" color={PRIMARY_YELLOW} />
       </View>
     );
   }
@@ -499,30 +575,75 @@ function HomeRestaurant() {
   if (notFound || !store) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.title}>My Store</Text>
-          <Text style={styles.subtitle}>
-            Set up your restaurant on BiteDash
-          </Text>
+        <View style={[styles.pageHeader, { paddingTop: 24 }]}>
+          <View style={styles.sectionTitleRow}>
+            <View style={styles.sectionTitleAccent} />
+            <Text style={styles.sectionTitle}>My Store</Text>
+          </View>
+          <Text style={styles.pageSubtitle}>Set up your restaurant on BiteDash</Text>
         </View>
-        <View style={styles.centered}>
-          <Text style={styles.emptyText}>You don&apos;t have a store yet.</Text>
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyTitle}>You don’t have a store yet</Text>
+          <Text style={styles.emptySubtext}>
+            Create your restaurant to add a menu and start receiving orders.
+          </Text>
           <TouchableOpacity
-            style={styles.primaryButton}
+            style={styles.primaryBtn}
             onPress={() => router.push("/restaurant/edit")}
+            activeOpacity={0.88}
           >
-            <Text style={styles.primaryButtonText}>Create restaurant</Text>
+            <Text style={styles.primaryBtnText}>Create restaurant</Text>
           </TouchableOpacity>
         </View>
       </View>
     );
   }
 
+  const bottomPad = Math.max(insets.bottom, 24);
+
   return (
     <View style={styles.container}>
+      <View style={[styles.pageHeader, { paddingTop: 24 }]}>
+        <View style={styles.storePageHeaderRow}>
+          <View style={styles.sectionTitleRow}>
+            <View style={styles.sectionTitleAccent} />
+            <Text style={styles.sectionTitle}>My Store</Text>
+          </View>
+          <Pressable
+            style={({ pressed }) => [
+              styles.storeHeaderPowerBtn,
+              store.is_open ? styles.storePowerBtnOn : styles.storePowerBtnOff,
+              pressed && styles.storePowerBtnPressed,
+            ]}
+            onPress={handleToggleOpen}
+            disabled={togglingStatus}
+          >
+            {togglingStatus ? (
+              <ActivityIndicator
+                size="small"
+                color={store.is_open ? "#fff" : "#6b7280"}
+              />
+            ) : (
+              <Text
+                style={[
+                  styles.storeHeaderPowerIconText,
+                  store.is_open ? styles.storePowerIconOn : styles.storePowerIconOff,
+                ]}
+              >
+                ⏻
+              </Text>
+            )}
+          </Pressable>
+        </View>
+        <Text style={styles.pageSubtitle} numberOfLines={1}>
+          {store.name}
+        </Text>
+      </View>
+
       <ScrollView
         style={styles.restaurantScroll}
-        contentContainerStyle={styles.restaurantScrollContent}
+        contentContainerStyle={[styles.restaurantScrollContent, { paddingBottom: bottomPad }]}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -531,85 +652,237 @@ function HomeRestaurant() {
           />
         }
       >
-        <View style={styles.header}>
-          <Text style={styles.title}>My Store</Text>
-          <Text style={styles.subtitle}>{store.name}</Text>
-        </View>
-        <View style={styles.dashboardCard}>
-          <View style={styles.storeRow}>
-            <Text style={styles.storeName}>{store.name}</Text>
-            <View
-              style={[
-                styles.badge,
-                store.is_open ? styles.badgeOpen : styles.badgeClosed,
-              ]}
-            >
-              <Text style={styles.badgeText}>
-                {store.is_open
-                  ? STORE_STATUS_LABELS.open
-                  : STORE_STATUS_LABELS.closed}
-              </Text>
-            </View>
+        <View style={styles.storeStatsRow}>
+          <View style={styles.storeStatCard}>
+            <Text style={styles.storeStatValue}>{totalOrders}</Text>
+            <Text style={styles.storeStatLabel}>Total orders</Text>
           </View>
-          <Text style={styles.storeDesc}>
-            {store.description ?? store.location}
-          </Text>
-          <View style={styles.actionGrid}>
-            <TouchableOpacity
-              style={styles.actionBtn}
-              onPress={() => router.push("/restaurant/edit")}
-            >
-              <Text style={styles.actionBtnText}>Edit store</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.actionBtnPrimary]}
-              onPress={() => router.push("/restaurant/menu")}
-            >
-              <Text style={styles.actionBtnTextPrimary}>Manage menu</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.actionBtn}
-              onPress={() => router.push("/restaurant/orders")}
-            >
-              <Text style={styles.actionBtnText}>View orders</Text>
-            </TouchableOpacity>
+          <View style={styles.storeStatCard}>
+            <View style={styles.storeEarningsHeader}>
+              <Text style={styles.storeStatLabel}>Total earnings</Text>
+              <TouchableOpacity
+                style={styles.storeEarningsFilterBtn}
+                onPress={() => setEarningsFilterOpen(true)}
+                hitSlop={8}
+              >
+                <IconSymbol
+                  name="line.3.horizontal.decrease.circle"
+                  size={20}
+                  color={PRIMARY_YELLOW}
+                />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.storeStatValue}>{formatKES(totalEarnings)}</Text>
+            <Text style={styles.storeStatPeriodLabel}>{earningsPeriodLabel}</Text>
           </View>
         </View>
 
-        <View style={styles.restaurantSectionHeader}>
-          <Text style={styles.sectionTitle}>Recent orders</Text>
+        <View style={styles.storeDashboardCard}>
+          <View style={styles.storeDashboardTitleWrap}>
+            <Text style={styles.storeDashboardName} numberOfLines={1}>
+              {store.name}
+            </Text>
+            <Text style={styles.storeDashboardStatusLabel}>
+              {store.is_open ? STORE_STATUS_LABELS.open : STORE_STATUS_LABELS.closed}
+            </Text>
+          </View>
+          {(store.description || store.location) ? (
+            <Text style={styles.storeDashboardDesc} numberOfLines={2}>
+              {store.description ?? store.location}
+            </Text>
+          ) : null}
           <TouchableOpacity
-            onPress={() => router.push("/restaurant/orders")}
-            hitSlop={8}
+            style={styles.storeMenuCta}
+            onPress={() => router.push("/restaurant/menu")}
+            activeOpacity={0.88}
           >
-            <Text style={styles.sectionLink}>View all</Text>
+            <IconSymbol name="menucard.fill" size={22} color="#fff" />
+            <Text style={styles.storeMenuCtaText}>Menu</Text>
           </TouchableOpacity>
         </View>
-        {recentOrders.length === 0 ? (
-          <View style={styles.recentOrdersEmptyRestaurant}>
-            <Text style={styles.recentOrdersEmptyText}>No orders yet</Text>
-          </View>
-        ) : (
-          recentOrders.map((order) => (
+
+        <View style={styles.storeOrdersSection}>
+          <View style={styles.storeOrdersSectionHeader}>
+            <View style={styles.sectionTitleRow}>
+              <View style={styles.sectionTitleAccent} />
+              <Text style={styles.sectionTitle}>Orders</Text>
+            </View>
             <TouchableOpacity
-              key={order.id}
-              style={styles.recentOrderRow}
-              onPress={() => router.push(`/restaurant/orders/${order.id}`)}
-              activeOpacity={0.8}
+              onPress={() => router.push("/restaurant/orders")}
+              hitSlop={8}
             >
-              <View style={styles.recentOrderLeft}>
-                <Text style={styles.recentOrderId}>Order #{order.id}</Text>
-                <Text style={styles.recentOrderMeta}>
-                  {ORDER_STATUS_LABELS[order.status] ?? order.status} · {formatRelative(order.created_at)}
-                </Text>
-              </View>
-              <Text style={styles.recentOrderAmount}>
-                {formatKES(order.total_amount)}
-              </Text>
+              <Text style={styles.sectionLink}>View all</Text>
             </TouchableOpacity>
-          ))
-        )}
+          </View>
+
+          <View style={styles.storeOrdersTable}>
+            <View style={styles.storeOrdersTableHeader}>
+              <Text style={[styles.storeOrdersTh, styles.storeOrdersThId]}>Order</Text>
+              <Text style={[styles.storeOrdersTh, styles.storeOrdersThStatus]}>Status</Text>
+              <Text style={[styles.storeOrdersTh, styles.storeOrdersThAmount]}>Amount</Text>
+              <Text style={[styles.storeOrdersTh, styles.storeOrdersThAction]}>Action</Text>
+            </View>
+            {orders.length === 0 ? (
+              <View style={styles.storeOrdersEmptyRow}>
+                <Text style={styles.storeOrdersEmptyText}>No orders yet</Text>
+              </View>
+            ) : (
+              orders.slice(0, 15).map((order, index) => {
+                const isUpdating = updatingOrderId === order.id;
+                const isLast = index === Math.min(orders.length, 15) - 1;
+                return (
+                  <View
+                    key={order.id}
+                    style={[styles.storeOrdersRow, isLast && styles.storeOrdersRowLast]}
+                  >
+                    <TouchableOpacity
+                      style={styles.storeOrdersCellId}
+                      onPress={() => router.push(`/restaurant/orders/${order.id}`)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.storeOrdersIdText}>#{order.id}</Text>
+                      <Text style={styles.storeOrdersTimeText} numberOfLines={1}>
+                        {formatRelative(order.created_at)}
+                      </Text>
+                    </TouchableOpacity>
+                    <View style={styles.storeOrdersCellStatus}>
+                      <Text style={styles.storeOrderStatusText}>
+                        {ORDER_STATUS_LABELS[order.status] ?? order.status}
+                      </Text>
+                    </View>
+                    <View style={styles.storeOrdersCellAmount}>
+                      <Text style={styles.storeOrdersAmountText} numberOfLines={1}>
+                        {order.total_amount.toLocaleString("en-KE")}
+                      </Text>
+                    </View>
+                    <View style={styles.storeOrdersCellAction}>
+                      <TouchableOpacity
+                        style={styles.storeOrderMenuTrigger}
+                        onPress={() => setOrderMenuOrderId(order.id)}
+                        disabled={isUpdating}
+                        hitSlop={8}
+                        activeOpacity={0.7}
+                      >
+                        {isUpdating ? (
+                          <ActivityIndicator size="small" color="#6b7280" />
+                        ) : (
+                          <IconSymbol name="ellipsis" size={22} color="#6b7280" />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
+        </View>
       </ScrollView>
+
+      <Modal
+        visible={earningsFilterOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEarningsFilterOpen(false)}
+      >
+        <Pressable
+          style={styles.orderMenuBackdrop}
+          onPress={() => setEarningsFilterOpen(false)}
+        >
+          <View style={styles.earningsFilterSheet} onStartShouldSetResponder={() => true}>
+            <Text style={styles.earningsFilterTitle}>Earnings period</Text>
+            {(["all", "week", "month"] as const).map((p) => (
+              <TouchableOpacity
+                key={p}
+                style={styles.earningsFilterItem}
+                onPress={() => {
+                  setEarningsPeriod(p);
+                  setEarningsFilterOpen(false);
+                }}
+              >
+                <Text style={styles.earningsFilterItemText}>
+                  {p === "all" ? "All time" : p === "week" ? "This week" : "This month"}
+                </Text>
+                {earningsPeriod === p && (
+                  <IconSymbol name="chevron.right" size={18} color={PRIMARY_YELLOW} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={menuOrder != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOrderMenuOrderId(null)}
+      >
+        <Pressable
+          style={styles.orderMenuBackdrop}
+          onPress={() => setOrderMenuOrderId(null)}
+        >
+          <View style={styles.orderMenuSheet} onStartShouldSetResponder={() => true}>
+            {menuOrder && (
+              <>
+                <View style={styles.orderMenuHeader}>
+                  <Text style={styles.orderMenuTitle}>Order #{menuOrder.id}</Text>
+                  <Text style={styles.orderMenuSubtitle}>
+                    {ORDER_STATUS_LABELS[menuOrder.status] ?? menuOrder.status}
+                  </Text>
+                </View>
+                {menuOrder.status === "pending" && (
+                  <TouchableOpacity
+                    style={styles.orderMenuItem}
+                    onPress={() => {
+                      setOrderMenuOrderId(null);
+                      handleOrderStatus(menuOrder, "preparing");
+                    }}
+                  >
+                    <Text style={styles.orderMenuItemText}>Prepare</Text>
+                  </TouchableOpacity>
+                )}
+                {menuOrder.status === "preparing" && (
+                  <TouchableOpacity
+                    style={styles.orderMenuItem}
+                    onPress={() => {
+                      setOrderMenuOrderId(null);
+                      handleOrderStatus(menuOrder, "on_the_way");
+                    }}
+                  >
+                    <Text style={styles.orderMenuItemText}>Dispatch</Text>
+                  </TouchableOpacity>
+                )}
+                {menuOrder.status === "on_the_way" && (
+                  <TouchableOpacity
+                    style={styles.orderMenuItem}
+                    onPress={() => {
+                      setOrderMenuOrderId(null);
+                      handleOrderStatus(menuOrder, "delivered");
+                    }}
+                  >
+                    <Text style={styles.orderMenuItemText}>Mark delivered</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={styles.orderMenuItem}
+                  onPress={() => {
+                    setOrderMenuOrderId(null);
+                    router.push(`/restaurant/orders/${menuOrder.id}`);
+                  }}
+                >
+                  <Text style={styles.orderMenuItemText}>View order</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.orderMenuItem, styles.orderMenuCancel]}
+                  onPress={() => setOrderMenuOrderId(null)}
+                >
+                  <Text style={styles.orderMenuCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -760,8 +1033,20 @@ function HomeRider() {
 }
 
 export default function HomeScreen() {
+  const isHydrated = useAuthStore((s) => s.isHydrated);
   const user = useAuthStore((s) => s.user);
-  const role = user?.role ?? "customer";
+  const role = isHydrated ? String(user?.role ?? "customer").toLowerCase() : null;
+
+  if (!isHydrated || role === null) {
+    return (
+      <View style={styles.homeContainer}>
+        <View style={[styles.homeHero, { paddingTop: 48, paddingBottom: 48 }]}>
+          <ActivityIndicator size="large" color="#fff" />
+          <Text style={[styles.heroTitle, { marginTop: 16, fontSize: 18 }]}>Loading...</Text>
+        </View>
+      </View>
+    );
+  }
 
   if (role === "restaurant") return <HomeRestaurant />;
   if (role === "rider") return <HomeRider />;
@@ -891,6 +1176,287 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: PRIMARY_YELLOW,
   },
+  pageHeader: {
+    paddingHorizontal: HOME_PADDING,
+    paddingTop: 24,
+    paddingBottom: 16,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
+  },
+  storePageHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  storeHeaderPowerBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  storeHeaderPowerIconText: { fontSize: 18, fontWeight: "600" },
+  pageSubtitle: {
+    fontSize: 13,
+    color: "#6b7280",
+    marginTop: 6,
+  },
+  manageStoreCta: {
+    backgroundColor: PRIMARY_YELLOW,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    marginTop: 16,
+  },
+  manageStoreCtaText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#fff",
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 32,
+  },
+  emptyTitle: {
+    fontSize: 17,
+    fontWeight: "600",
+    color: "#111",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: "#6b7280",
+    lineHeight: 20,
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  primaryBtn: {
+    backgroundColor: PRIMARY_YELLOW,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+  },
+  primaryBtnText: { fontSize: 15, fontWeight: "600", color: "#fff" },
+  storeStatsRow: {
+    flexDirection: "row",
+    marginHorizontal: HOME_PADDING,
+    marginTop: 16,
+    gap: 12,
+  },
+  storeStatCard: {
+    flex: 1,
+    backgroundColor: "#fff",
+    borderRadius: STORE_DASHBOARD_CARD_RADIUS,
+    padding: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 72,
+  },
+  storeStatValue: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  storeStatLabel: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginTop: 4,
+  },
+  storeEarningsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    marginBottom: 4,
+  },
+  storeEarningsFilterBtn: {
+    padding: 4,
+  },
+  storeStatPeriodLabel: {
+    fontSize: 11,
+    color: "#9ca3af",
+    marginTop: 2,
+  },
+  earningsFilterSheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingTop: 12,
+    paddingBottom: 32,
+    paddingHorizontal: 20,
+  },
+  earningsFilterTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#6b7280",
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  earningsFilterItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+  },
+  earningsFilterItemText: {
+    fontSize: 16,
+    fontWeight: "500",
+    color: "#111",
+  },
+  orderMenuBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "flex-end",
+  },
+  orderMenuSheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingTop: 8,
+    paddingBottom: 32,
+    paddingHorizontal: 20,
+  },
+  orderMenuHeader: {
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
+    marginBottom: 8,
+  },
+  orderMenuTitle: { fontSize: 16, fontWeight: "700", color: "#111" },
+  orderMenuSubtitle: { fontSize: 13, color: "#6b7280", marginTop: 2 },
+  orderMenuItem: {
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+  },
+  orderMenuItemText: { fontSize: 16, fontWeight: "500", color: "#111" },
+  orderMenuCancel: { marginTop: 8 },
+  orderMenuCancelText: { fontSize: 16, fontWeight: "500", color: "#6b7280" },
+  storeDashboardCard: {
+    marginHorizontal: HOME_PADDING,
+    marginTop: 16,
+    backgroundColor: "#fff",
+    borderRadius: STORE_DASHBOARD_CARD_RADIUS,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "#f0f0f0",
+  },
+  storeDashboardTitleWrap: { minWidth: 0 },
+  storeDashboardName: { fontSize: 18, fontWeight: "600", color: "#111" },
+  storeDashboardStatusLabel: { fontSize: 12, color: "#6b7280", marginTop: 2 },
+  storePowerBtnOn: { backgroundColor: PRIMARY_YELLOW },
+  storePowerBtnOff: { backgroundColor: "#f3f4f6" },
+  storePowerBtnPressed: { opacity: 0.9 },
+  storePowerIconOn: { color: "#fff" },
+  storePowerIconOff: { color: "#6b7280" },
+  storeDashboardDesc: {
+    fontSize: 14,
+    color: "#6b7280",
+    lineHeight: 20,
+    marginTop: 12,
+  },
+  storeMenuCta: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: PRIMARY_YELLOW,
+    paddingVertical: 14,
+    borderRadius: 12,
+    marginTop: 16,
+  },
+  storeMenuCtaText: { fontSize: 16, fontWeight: "600", color: "#fff" },
+  storeOrdersSection: {
+    marginTop: 24,
+    paddingHorizontal: HOME_PADDING,
+  },
+  storeOrdersSectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  storeOrdersTable: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  storeOrdersTableHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: "#f8fafc",
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
+  },
+  storeOrdersTh: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  storeOrdersThId: { flex: 1.15, paddingRight: 10 },
+  storeOrdersThStatus: { flex: 1.05, paddingRight: 10 },
+  storeOrdersThAmount: { flex: 1, paddingRight: 10 },
+  storeOrdersThAction: { flex: 0.85, alignItems: "flex-end" },
+  storeOrdersRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+  },
+  storeOrdersRowLast: {
+    borderBottomWidth: 0,
+  },
+  storeOrdersCellId: { flex: 1.15, paddingRight: 10 },
+  storeOrdersIdText: { fontSize: 15, fontWeight: "600", color: "#0f172a" },
+  storeOrdersTimeText: { fontSize: 12, color: "#64748b", marginTop: 3 },
+  storeOrdersCellStatus: { flex: 1.05, paddingRight: 10 },
+  storeOrderStatusText: { fontSize: 13, fontWeight: "500", color: "#374151" },
+  storeOrdersCellAmount: { flex: 1, paddingRight: 10 },
+  storeOrdersAmountText: { fontSize: 13, fontWeight: "600", color: "#0f172a" },
+  storeOrdersCellAction: { flex: 0.85, alignItems: "flex-end" },
+  storeOrderMenuTrigger: {
+    padding: 2,
+    alignSelf: "flex-end",
+  },
+  storeOrderActionBtn: {
+    backgroundColor: PRIMARY_YELLOW,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    alignSelf: "flex-start",
+  },
+  storeOrderActionBtnText: { fontSize: 12, fontWeight: "600", color: "#fff" },
+  storeOrderViewBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    alignSelf: "flex-start",
+  },
+  storeOrderViewBtnText: { fontSize: 12, fontWeight: "600", color: PRIMARY_YELLOW },
+  storeOrdersEmptyRow: {
+    paddingVertical: 24,
+    paddingHorizontal: 12,
+    alignItems: "center",
+  },
+  storeOrdersEmptyText: { fontSize: 14, color: "#6b7280" },
   storeCarouselContent: {
     paddingLeft: HOME_PADDING,
     paddingRight: HOME_PADDING - STORE_CARD_MARGIN,

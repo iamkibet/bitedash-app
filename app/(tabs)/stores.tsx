@@ -1,29 +1,38 @@
 import { getApiMessage } from "@/lib/api/client";
-import { getMyStore, listStores } from "@/lib/api/stores";
-import { STORE_STATUS_LABELS } from "@/lib/constants";
+import { listMyRestaurantOrders, updateOrder } from "@/lib/api/orders";
+import { getMyStore, listStores, toggleStoreStatus } from "@/lib/api/stores";
+import { ORDER_STATUS_LABELS, STORE_STATUS_LABELS } from "@/lib/constants";
 import { useAuthStore } from "@/lib/store/authStore";
-import type { Store } from "@/types/api";
+import { formatKES, formatRelative } from "@/lib/utils/formatters";
+import type { Order, Store } from "@/types/api";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   Image,
+  Platform,
+  Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { IconSymbol } from "@/components/ui/icon-symbol";
 
-const ROW_IMAGE_SIZE = 72;
-const CARD_RADIUS = 12;
 const ACCENT = "#f59e0b";
+const ROW_IMAGE_SIZE = 80;
+const CARD_RADIUS = 14;
+const HORIZONTAL_PADDING = 20;
 
-/** Customer: Compact stores list – row layout, no big cards */
+/** Customer: Browse stores – organised list, open first */
 function StoresList() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [stores, setStores] = useState<Store[]>([]);
   const [meta, setMeta] = useState<{
     current_page: number;
@@ -33,131 +42,197 @@ function StoresList() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = async (p = 1, refresh = false) => {
-    if (refresh) setRefreshing(true);
-    else setLoading(true);
+  const load = useCallback(async (p = 1, isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else if (p === 1) setLoading(true);
     try {
       const res = await listStores({ page: p });
       if (p === 1) setStores(res.data);
       else setStores((prev) => [...prev, ...res.data]);
       setMeta(res.meta);
     } catch {
-      setStores([]);
+      if (p === 1) setStores([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    load(page);
-  }, [page]);
+    load(1);
+  }, [load]);
+
+  const sortedStores = [...stores].sort((a, b) => {
+    if (a.is_open === b.is_open) return 0;
+    return a.is_open ? -1 : 1;
+  });
+  const openCount = stores.filter((s) => s.is_open).length;
+  const listBottom = Math.max(insets.bottom, 24);
 
   const renderItem = ({ item }: { item: Store }) => (
-    <TouchableOpacity
-      style={styles.row}
+    <Pressable
+      style={({ pressed }) => [styles.storeCard, pressed && styles.storeCardPressed]}
       onPress={() => router.push(`/store/${item.id}`)}
-      activeOpacity={0.82}
     >
-      <View style={styles.rowImageWrap}>
+      <View style={styles.storeCardImageWrap}>
         {item.image_url ? (
-          <Image source={{ uri: item.image_url }} style={styles.rowImage} />
+          <Image source={{ uri: item.image_url }} style={styles.storeCardImage} />
         ) : (
-          <View style={styles.rowImagePlaceholder}>
-            <Text style={styles.rowPlaceholderIcon}>🏪</Text>
+          <View style={styles.storeCardImagePlaceholder}>
+            <IconSymbol name="storefront.fill" size={28} color="#9ca3af" />
           </View>
         )}
         <View
           style={[
-            styles.statusDot,
-            item.is_open ? styles.statusOpen : styles.statusClosed,
-          ]}
-        />
-      </View>
-      <View style={styles.rowBody}>
-        <Text style={styles.rowTitle} numberOfLines={1}>
-          {item.name}
-        </Text>
-        <Text style={styles.rowMeta} numberOfLines={1}>
-          {item.description ?? item.location}
-        </Text>
-        <View
-          style={[
-            styles.badge,
-            item.is_open ? styles.badgeOpen : styles.badgeClosed,
+            styles.storeCardStatusPill,
+            item.is_open ? styles.storeCardStatusOpen : styles.storeCardStatusClosed,
           ]}
         >
-          <Text style={styles.badgeText}>
-            {item.is_open
-              ? STORE_STATUS_LABELS.open
-              : STORE_STATUS_LABELS.closed}
+          <Text style={styles.storeCardStatusText}>
+            {item.is_open ? STORE_STATUS_LABELS.open : STORE_STATUS_LABELS.closed}
           </Text>
         </View>
       </View>
-      <Text style={styles.rowChevron}>›</Text>
-    </TouchableOpacity>
+      <View style={styles.storeCardBody}>
+        <Text style={styles.storeCardName} numberOfLines={1}>
+          {item.name}
+        </Text>
+        <Text style={styles.storeCardMeta} numberOfLines={2}>
+          {item.description ?? item.location}
+        </Text>
+      </View>
+      <View style={styles.storeCardChevronWrap}>
+        <IconSymbol name="chevron.right" size={20} color="#9ca3af" />
+      </View>
+    </Pressable>
   );
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Stores</Text>
-        <Text style={styles.subtitle}>
+      <View style={[styles.pageHeader, { paddingTop: 12 + (Platform.OS === "ios" ? 0 : 8) }]}>
+        <View style={styles.sectionTitleRow}>
+          <View style={styles.sectionTitleAccent} />
+          <Text style={styles.sectionTitle}>Browse stores</Text>
+        </View>
+        <Text style={styles.pageSubtitle}>
           {stores.length > 0
-            ? `${stores.length} place${stores.length === 1 ? "" : "s"} to order from`
-            : "Browse and order from your favourite stores"}
+            ? `${openCount} open · ${stores.length} total`
+            : "Find restaurants and order delivery"}
         </Text>
       </View>
+
       {loading && page === 1 ? (
         <View style={styles.centered}>
           <ActivityIndicator size="small" color={ACCENT} />
         </View>
       ) : stores.length === 0 ? (
-        <View style={styles.centered}>
-          <Text style={styles.emptyText}>No stores found.</Text>
+        <View style={styles.emptyState}>
+          <View style={styles.emptyIconWrap}>
+            <IconSymbol name="storefront.fill" size={40} color="#d1d5db" />
+          </View>
+          <Text style={styles.emptyTitle}>No stores yet</Text>
+          <Text style={styles.emptySubtext}>
+            Stores will appear here when they’re added. Check back later.
+          </Text>
         </View>
       ) : (
         <FlatList
-          data={stores}
+          data={sortedStores}
           keyExtractor={(item) => String(item.id)}
           renderItem={renderItem}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.listContent, { paddingBottom: listBottom }]}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={() => load(1, true)}
+              onRefresh={() => {
+                setPage(1);
+                load(1, true);
+              }}
               tintColor={ACCENT}
             />
           }
           onEndReached={() => {
-            if (meta && page < meta.last_page && !loading)
-              setPage((p) => p + 1);
+            if (meta && page < meta.last_page && !loading) {
+              const nextPage = page + 1;
+              setPage(nextPage);
+              load(nextPage);
+            }
           }}
           onEndReachedThreshold={0.3}
+          showsVerticalScrollIndicator={false}
         />
       )}
     </View>
   );
 }
 
-/** Restaurant: My Store – compact card */
+/** Restaurant: My Store – open/close toggle, menu link, orders table */
 function StoresRestaurant() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [store, setStore] = useState<Store | null>(null);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const [togglingStatus, setTogglingStatus] = useState(false);
+  const [updatingOrderId, setUpdatingOrderId] = useState<number | null>(null);
 
-  useEffect(() => {
-    getMyStore()
-      .then(setStore)
-      .catch((e) => {
-        if (e.response?.status === 404) setNotFound(true);
-        else Alert.alert("Error", getApiMessage(e));
-      })
-      .finally(() => setLoading(false));
+  const load = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+    try {
+      const [storeRes, ordersRes] = await Promise.all([
+        getMyStore(),
+        listMyRestaurantOrders({ page: 1 }),
+      ]);
+      setStore(storeRes);
+      setOrders(ordersRes.data);
+    } catch (e) {
+      if ((e as { response?: { status: number } })?.response?.status === 404) {
+        setNotFound(true);
+        setStore(null);
+      } else {
+        Alert.alert("Error", getApiMessage(e));
+      }
+      setOrders([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
-  if (loading) {
+  useEffect(() => {
+    if (notFound) return;
+    load();
+  }, [load, notFound]);
+
+  const handleToggleOpen = useCallback(async () => {
+    if (!store || togglingStatus) return;
+    setTogglingStatus(true);
+    try {
+      const updated = await toggleStoreStatus(store.id);
+      setStore(updated);
+    } catch (e) {
+      Alert.alert("Error", getApiMessage(e));
+    } finally {
+      setTogglingStatus(false);
+    }
+  }, [store, togglingStatus]);
+
+  const handleOrderStatus = useCallback(async (order: Order, newStatus: Order["status"]) => {
+    setUpdatingOrderId(order.id);
+    try {
+      const updated = await updateOrder(order.id, { status: newStatus });
+      setOrders((prev) => prev.map((o) => (o.id === order.id ? updated : o)));
+    } catch (e) {
+      Alert.alert("Error", getApiMessage(e));
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  }, []);
+
+  if (loading && !store) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="small" color={ACCENT} />
@@ -168,15 +243,22 @@ function StoresRestaurant() {
   if (notFound || !store) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.title}>My Store</Text>
-          <Text style={styles.subtitle}>Set up your restaurant on BiteDash</Text>
+        <View style={[styles.pageHeader, { paddingTop: 12 }]}>
+          <View style={styles.sectionTitleRow}>
+            <View style={styles.sectionTitleAccent} />
+            <Text style={styles.sectionTitle}>My Store</Text>
+          </View>
+          <Text style={styles.pageSubtitle}>Set up your restaurant on BiteDash</Text>
         </View>
-        <View style={styles.centered}>
-          <Text style={styles.emptyText}>You don&apos;t have a store yet.</Text>
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyTitle}>You don’t have a store yet</Text>
+          <Text style={styles.emptySubtext}>
+            Create your restaurant to add a menu and start receiving orders.
+          </Text>
           <TouchableOpacity
             style={styles.primaryBtn}
             onPress={() => router.push("/restaurant/edit")}
+            activeOpacity={0.88}
           >
             <Text style={styles.primaryBtnText}>Create restaurant</Text>
           </TouchableOpacity>
@@ -185,69 +267,200 @@ function StoresRestaurant() {
     );
   }
 
+  const bottomPad = Math.max(insets.bottom, 24);
+
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>My Store</Text>
-        <Text style={styles.subtitle}>{store.name}</Text>
+      <View style={[styles.pageHeader, { paddingTop: 12 }]}>
+        <View style={styles.sectionTitleRow}>
+          <View style={styles.sectionTitleAccent} />
+          <Text style={styles.sectionTitle}>My Store</Text>
+        </View>
+        <Text style={styles.pageSubtitle} numberOfLines={1}>
+          {store.name}
+        </Text>
       </View>
-      <View style={styles.dashboardCard}>
-        <View style={styles.storeRow}>
-          <Text style={styles.storeName} numberOfLines={1}>
-            {store.name}
-          </Text>
-          <View
-            style={[
-              styles.badge,
-              store.is_open ? styles.badgeOpen : styles.badgeClosed,
-            ]}
-          >
-            <Text style={styles.badgeText}>
-              {store.is_open
-                ? STORE_STATUS_LABELS.open
-                : STORE_STATUS_LABELS.closed}
+
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={{ paddingBottom: bottomPad }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => load(true)}
+            tintColor={ACCENT}
+          />
+        }
+      >
+        {/* Store card: name, power (open/close), menu CTA */}
+        <View style={styles.dashboardCard}>
+          <View style={styles.dashboardTop}>
+            <View style={styles.dashboardTitleWrap}>
+              <Text style={styles.dashboardStoreName} numberOfLines={1}>
+                {store.name}
+              </Text>
+              <Text style={styles.dashboardStatusLabel}>
+                {store.is_open ? STORE_STATUS_LABELS.open : STORE_STATUS_LABELS.closed}
+              </Text>
+            </View>
+            <Pressable
+              style={({ pressed }) => [
+                styles.powerBtn,
+                store.is_open ? styles.powerBtnOn : styles.powerBtnOff,
+                pressed && styles.powerBtnPressed,
+              ]}
+              onPress={handleToggleOpen}
+              disabled={togglingStatus}
+            >
+              {togglingStatus ? (
+                <ActivityIndicator
+                  size="small"
+                  color={store.is_open ? "#fff" : "#6b7280"}
+                />
+              ) : (
+                <Text style={[
+                  styles.powerIconText,
+                  store.is_open ? styles.powerIconOn : styles.powerIconOff,
+                ]}>
+                  ⏻
+                </Text>
+              )}
+            </Pressable>
+          </View>
+          {(store.description || store.location) ? (
+            <Text style={styles.dashboardDesc} numberOfLines={2}>
+              {store.description ?? store.location}
             </Text>
+          ) : null}
+          <TouchableOpacity
+            style={styles.menuCta}
+            onPress={() => router.push("/restaurant/menu")}
+            activeOpacity={0.88}
+          >
+            <IconSymbol name="menucard.fill" size={22} color="#fff" />
+            <Text style={styles.menuCtaText}>Menu</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Orders section */}
+        <View style={styles.ordersSection}>
+          <View style={styles.ordersSectionHeader}>
+            <View style={styles.sectionTitleRow}>
+              <View style={styles.sectionTitleAccent} />
+              <Text style={styles.sectionTitle}>Orders</Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => router.push("/restaurant/orders")}
+              hitSlop={8}
+            >
+              <Text style={styles.sectionLink}>View all</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.ordersTable}>
+            <View style={styles.ordersTableHeader}>
+              <Text style={[styles.ordersTh, styles.ordersThId]}>Order</Text>
+              <Text style={[styles.ordersTh, styles.ordersThStatus]}>Status</Text>
+              <Text style={[styles.ordersTh, styles.ordersThAmount]}>Amount</Text>
+              <Text style={[styles.ordersTh, styles.ordersThAction]}>Action</Text>
+            </View>
+            {orders.length === 0 ? (
+              <View style={styles.ordersEmptyRow}>
+                <Text style={styles.ordersEmptyText}>No orders yet</Text>
+              </View>
+            ) : (
+              orders.slice(0, 15).map((order) => {
+                const isUpdating = updatingOrderId === order.id;
+                return (
+                  <View key={order.id} style={styles.ordersRow}>
+                    <TouchableOpacity
+                      style={styles.ordersCellId}
+                      onPress={() => router.push(`/restaurant/orders/${order.id}`)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.ordersIdText}>#{order.id}</Text>
+                      <Text style={styles.ordersTimeText} numberOfLines={1}>
+                        {formatRelative(order.created_at)}
+                      </Text>
+                    </TouchableOpacity>
+                    <View style={styles.ordersCellStatus}>
+                      <View
+                        style={[
+                          styles.orderStatusBadge,
+                          order.status === "cancelled" && styles.orderStatusBadgeCancelled,
+                          order.status === "delivered" && styles.orderStatusBadgeDelivered,
+                        ]}
+                      >
+                        <Text style={styles.orderStatusBadgeText}>
+                          {ORDER_STATUS_LABELS[order.status] ?? order.status}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.ordersCellAmount}>
+                      <Text style={styles.ordersAmountText}>{formatKES(order.total_amount)}</Text>
+                    </View>
+                    <View style={styles.ordersCellAction}>
+                      {order.status === "pending" && (
+                        <TouchableOpacity
+                          style={styles.orderActionBtn}
+                          onPress={() => handleOrderStatus(order, "preparing")}
+                          disabled={isUpdating}
+                        >
+                          {isUpdating ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                          ) : (
+                            <Text style={styles.orderActionBtnText}>Prepare</Text>
+                          )}
+                        </TouchableOpacity>
+                      )}
+                      {order.status === "preparing" && (
+                        <TouchableOpacity
+                          style={styles.orderActionBtn}
+                          onPress={() => handleOrderStatus(order, "on_the_way")}
+                          disabled={isUpdating}
+                        >
+                          {isUpdating ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                          ) : (
+                            <Text style={styles.orderActionBtnText}>Dispatch</Text>
+                          )}
+                        </TouchableOpacity>
+                      )}
+                      {(order.status === "on_the_way" || order.status === "delivered" || order.status === "cancelled") && (
+                        <TouchableOpacity
+                          style={styles.orderViewBtn}
+                          onPress={() => router.push(`/restaurant/orders/${order.id}`)}
+                        >
+                          <Text style={styles.orderViewBtnText}>View</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                );
+              })
+            )}
           </View>
         </View>
-        <Text style={styles.storeDesc} numberOfLines={2}>
-          {store.description ?? store.location}
-        </Text>
-        <View style={styles.actionRow}>
-          <TouchableOpacity
-            style={styles.actionBtn}
-            onPress={() => router.push("/restaurant/edit")}
-          >
-            <Text style={styles.actionBtnText}>Edit</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.actionBtnPrimary]}
-            onPress={() => router.push("/restaurant/menu")}
-          >
-            <Text style={styles.actionBtnTextPrimary}>Menu</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.actionBtn}
-            onPress={() => router.push("/restaurant/orders")}
-          >
-            <Text style={styles.actionBtnText}>Orders</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+      </ScrollView>
     </View>
   );
 }
 
-/** Rider */
+/** Rider: informational */
 function StoresRider() {
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Stores</Text>
-        <Text style={styles.subtitle}>Browse stores and place orders</Text>
+      <View style={[styles.pageHeader, { paddingTop: 12 }]}>
+        <View style={styles.sectionTitleRow}>
+          <View style={styles.sectionTitleAccent} />
+          <Text style={styles.sectionTitle}>Stores</Text>
+        </View>
+        <Text style={styles.pageSubtitle}>Browse and place orders as a customer</Text>
       </View>
-      <View style={styles.centered}>
-        <Text style={styles.emptyText}>
-          Stores are for customers. Use Orders for your deliveries.
+      <View style={styles.emptyState}>
+        <Text style={styles.emptySubtext}>
+          As a rider, use the Orders tab for deliveries. Switch to a customer account to browse stores.
         </Text>
       </View>
     </View>
@@ -256,7 +469,7 @@ function StoresRider() {
 
 export default function StoresScreen() {
   const user = useAuthStore((s) => s.user);
-  const role = user?.role ?? "customer";
+  const role = String(user?.role ?? "customer").toLowerCase();
 
   if (role === "restaurant") return <StoresRestaurant />;
   if (role === "rider") return <StoresRider />;
@@ -265,106 +478,291 @@ export default function StoresScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fafafa" },
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
+  pageHeader: {
+    paddingHorizontal: HORIZONTAL_PADDING,
     paddingBottom: 16,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
   },
-  title: { fontSize: 22, fontWeight: "700", color: "#111" },
-  subtitle: { fontSize: 13, color: "#6b7280", marginTop: 2 },
-  list: { paddingHorizontal: 16, paddingBottom: 24 },
+  sectionTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  sectionTitleAccent: {
+    width: 3,
+    height: 18,
+    borderRadius: 2,
+    backgroundColor: ACCENT,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#1f2937",
+    letterSpacing: 0.2,
+  },
+  pageSubtitle: {
+    fontSize: 13,
+    color: "#6b7280",
+    marginTop: 6,
+  },
+  listContent: {
+    paddingHorizontal: HORIZONTAL_PADDING,
+    paddingTop: 16,
+  },
   centered: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
   },
-  emptyText: { color: "#6b7280", fontSize: 14, textAlign: "center" },
-  // Customer list: compact rows
-  row: {
+  emptyState: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 32,
+  },
+  emptyIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#f3f4f6",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 17,
+    fontWeight: "600",
+    color: "#111",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: "#6b7280",
+    lineHeight: 20,
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  primaryBtn: {
+    backgroundColor: ACCENT,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+  },
+  primaryBtnText: { fontSize: 15, fontWeight: "600", color: "#fff" },
+  // Customer: store cards
+  storeCard: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#fff",
     borderRadius: CARD_RADIUS,
-    padding: 10,
-    marginBottom: 8,
+    padding: 12,
+    marginBottom: 10,
     borderWidth: 1,
     borderColor: "#f0f0f0",
   },
-  rowImageWrap: {
+  storeCardPressed: { opacity: 0.96 },
+  storeCardImageWrap: {
     width: ROW_IMAGE_SIZE,
     height: ROW_IMAGE_SIZE,
-    borderRadius: 10,
+    borderRadius: 12,
     overflow: "hidden",
-    backgroundColor: "#f0f0f0",
+    backgroundColor: "#f3f4f6",
   },
-  rowImage: { width: "100%", height: "100%" },
-  rowImagePlaceholder: {
+  storeCardImage: { width: "100%", height: "100%" },
+  storeCardImagePlaceholder: {
     width: "100%",
     height: "100%",
     justifyContent: "center",
     alignItems: "center",
   },
-  rowPlaceholderIcon: { fontSize: 28 },
-  statusDot: {
+  storeCardStatusPill: {
     position: "absolute",
-    top: 6,
-    right: 6,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  statusOpen: { backgroundColor: "#22c55e" },
-  statusClosed: { backgroundColor: "#94a3b8" },
-  rowBody: { flex: 1, marginLeft: 12, minWidth: 0 },
-  rowTitle: { fontSize: 15, fontWeight: "600", color: "#111" },
-  rowMeta: { fontSize: 12, color: "#6b7280", marginTop: 2 },
-  badge: {
-    alignSelf: "flex-start",
+    bottom: 6,
+    left: 6,
     paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginTop: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
   },
-  badgeOpen: { backgroundColor: "#dcfce7" },
-  badgeClosed: { backgroundColor: "#f1f5f9" },
-  badgeText: { fontSize: 11, fontWeight: "500", color: "#374151" },
-  rowChevron: { fontSize: 18, color: "#c4c4c4", fontWeight: "500", marginLeft: 4 },
+  storeCardStatusOpen: { backgroundColor: "rgba(34, 197, 94, 0.95)" },
+  storeCardStatusClosed: { backgroundColor: "rgba(100, 116, 139, 0.9)" },
+  storeCardStatusText: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: "#fff",
+  },
+  storeCardBody: {
+    flex: 1,
+    marginLeft: 14,
+    minWidth: 0,
+  },
+  storeCardName: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#111",
+  },
+  storeCardMeta: {
+    fontSize: 13,
+    color: "#6b7280",
+    marginTop: 2,
+    lineHeight: 18,
+  },
+  storeCardChevronWrap: {
+    padding: 4,
+  },
   // Restaurant dashboard
+  scroll: { flex: 1 },
   dashboardCard: {
-    marginHorizontal: 16,
+    marginHorizontal: HORIZONTAL_PADDING,
+    marginTop: 16,
     backgroundColor: "#fff",
     borderRadius: CARD_RADIUS,
-    padding: 16,
+    padding: 20,
     borderWidth: 1,
     borderColor: "#f0f0f0",
   },
-  storeRow: {
+  dashboardTop: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 8,
+    gap: 12,
   },
-  storeName: { fontSize: 17, fontWeight: "600", color: "#111", flex: 1 },
-  storeDesc: { fontSize: 13, color: "#6b7280", marginTop: 6 },
-  actionRow: { flexDirection: "row", gap: 8, marginTop: 14 },
-  actionBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    paddingVertical: 10,
-    borderRadius: 8,
+  dashboardTitleWrap: { flex: 1, minWidth: 0 },
+  dashboardStoreName: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#111",
+  },
+  dashboardStatusLabel: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginTop: 2,
+  },
+  powerBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: "center",
+    justifyContent: "center",
   },
-  actionBtnPrimary: { backgroundColor: ACCENT, borderColor: ACCENT },
-  actionBtnText: { fontSize: 13, fontWeight: "500", color: "#374151" },
-  actionBtnTextPrimary: { fontSize: 13, fontWeight: "600", color: "#fff" },
-  primaryBtn: {
+  powerBtnOn: {
     backgroundColor: ACCENT,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
+  },
+  powerBtnOff: {
+    backgroundColor: "#f3f4f6",
+  },
+  powerBtnPressed: { opacity: 0.9 },
+  powerIconText: { fontSize: 26, fontWeight: "600" },
+  powerIconOn: { color: "#fff" },
+  powerIconOff: { color: "#6b7280" },
+  dashboardDesc: {
+    fontSize: 14,
+    color: "#6b7280",
+    lineHeight: 20,
     marginTop: 12,
   },
-  primaryBtnText: { fontSize: 14, fontWeight: "600", color: "#fff" },
+  menuCta: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: ACCENT,
+    paddingVertical: 14,
+    borderRadius: 12,
+    marginTop: 16,
+  },
+  menuCtaText: { fontSize: 16, fontWeight: "600", color: "#fff" },
+  // Orders section
+  ordersSection: {
+    marginTop: 24,
+    paddingHorizontal: HORIZONTAL_PADDING,
+  },
+  ordersSectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  sectionLink: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: ACCENT,
+  },
+  ordersEmptyRow: {
+    paddingVertical: 24,
+    paddingHorizontal: 12,
+    alignItems: "center",
+  },
+  ordersEmptyText: {
+    fontSize: 14,
+    color: "#6b7280",
+  },
+  ordersTable: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#f0f0f0",
+    overflow: "hidden",
+  },
+  ordersTableHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: "#f9fafb",
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
+  },
+  ordersTh: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#6b7280",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  ordersThId: { flex: 1.2 },
+  ordersThStatus: { flex: 1 },
+  ordersThAmount: { flex: 0.9 },
+  ordersThAction: { flex: 1 },
+  ordersRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f5f5f5",
+  },
+  ordersCellId: { flex: 1.2 },
+  ordersIdText: { fontSize: 14, fontWeight: "600", color: "#111" },
+  ordersTimeText: { fontSize: 11, color: "#6b7280", marginTop: 2 },
+  ordersCellStatus: { flex: 1 },
+  orderStatusBadge: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: "#fef3c7",
+  },
+  orderStatusBadgeCancelled: { backgroundColor: "#fee2e2" },
+  orderStatusBadgeDelivered: { backgroundColor: "#dcfce7" },
+  orderStatusBadgeText: { fontSize: 11, fontWeight: "600", color: "#374151" },
+  ordersCellAmount: { flex: 0.9 },
+  ordersAmountText: { fontSize: 13, fontWeight: "600", color: "#111" },
+  ordersCellAction: { flex: 1 },
+  orderActionBtn: {
+    backgroundColor: ACCENT,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    alignSelf: "flex-start",
+  },
+  orderActionBtnText: { fontSize: 12, fontWeight: "600", color: "#fff" },
+  orderViewBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    alignSelf: "flex-start",
+  },
+  orderViewBtnText: { fontSize: 12, fontWeight: "600", color: ACCENT },
 });
